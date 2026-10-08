@@ -750,6 +750,7 @@ static const Seed seeds[]={
   {0x1a1a4d0, 53.33f, 0.f},         // monastery map -> X Locate: People / Facilities list
   {0x1a22378, 34.67f, 0.f, 3.5f},   // pause menu -> Quests: quest list (hand 3.5 px above a row's middle)
   {0x1a483c8, 33.3f, 0.f, 3.2f},    // Storehouse: Sell / Cancel popup
+  {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
 };
 static const Seed* seed_get(u32 vt){ for(unsigned i=0;i<sizeof(seeds)/sizeof(seeds[0]);i++) if(seeds[i].vt==vt) return &seeds[i]; return 0; }
@@ -894,6 +895,8 @@ static int hand_list_tap(u64 g,float x,float y){
   // tea party: "Offer some tea" (vt 0x1a00298) and the "A Talk!" prompt (vt 0x19fff68) are single buttons whose list has no
   // rows (count 0), so the generic list below swallowed every tap: a tap anywhere presses A
   if((vt==0x1a00298 || vt==0x19fff68) && widget_vis(o)){ press(BTN_A); tm_log2("tea button",(s64)vt,0); return 1; }
+  // Seminar lecturer list: "ZR Classes" prompt in the corner (the list below swallowed it)
+  if(vt==0x1a1e648 && inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_ZR); tm_log2("seminar classes",0,0); return 1; }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
   if(vt==0x1a436f8 && y<115.f){ // Units list header: ZL / ZR page arrows, "R Your Units / Enemy Units"
