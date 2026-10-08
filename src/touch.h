@@ -748,6 +748,9 @@ static const Seed seeds[]={
   {0x1a1d528, 0.f, 360.f},          // Tea party: the three conversation topics (1x3 button row, timed)
   {0x1a1e2d8, 0.f, 261.3f},         // lecture: "Update goals?" Yes / No (1x2 button row)
   {0x1a1a4d0, 53.33f, 0.f},         // monastery map -> X Locate: People / Facilities list
+  {0x1a22378, 34.67f, 0.f, 3.5f},   // pause menu -> Quests: quest list (hand 3.5 px above a row's middle)
+  {0x1a483c8, 33.3f, 0.f, 3.2f},    // Storehouse: Sell / Cancel popup
+  {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
 };
 static const Seed* seed_get(u32 vt){ for(unsigned i=0;i<sizeof(seeds)/sizeof(seeds[0]);i++) if(seeds[i].vt==vt) return &seeds[i]; return 0; }
 static float learned_pitch(u32 vt){ Learn*l=lrn_get(vt,0); if(l&&l->pitch>0.f) return l->pitch; const Seed*d=seed_get(vt); return d?d->pitch:0.f; }
@@ -849,8 +852,8 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   if(best<0 || bd>18.f) return 1;                // between sections or outside the list
   list_pick(l,best); tm_log2(abil?"abilities":"arts",best,idx); return 1; }   // double tap (the selected row: one tap)
 // command menus among the generic lists: one tap confirms (everything else is an item / unit list: double tap)
-static int popup_list(u32 vt){ return vt==0x1a25c88; }   // small confirm popups (shop Buy / Cancel, ...): one tap, no stop on the rows between
-static int single_tap_list(u32 vt){ return popup_list(vt) || vt==0x1a1db48 || vt==0x1a0eaf0 || vt==0x19ee290 || vt==0x1a3be68 || vt==0x1a083f0 || vt==0x1a20eb0 || vt==0x1a07bd8 || vt==0x19f0e48; }   // 0x19f0e48: prep wheel System -> Options / Guide
+static int popup_list(u32 vt){ return vt==0x1a25c88 || vt==0x1a483c8; }   // + Storehouse Sell / Cancel   // small confirm popups (shop Buy / Cancel, ...): one tap, no stop on the rows between
+static int single_tap_list(u32 vt){ return popup_list(vt) || vt==0x1a1db48 || vt==0x1a0eaf0 || vt==0x19ee290 || vt==0x1a3be68 || vt==0x1a083f0 || vt==0x1a20eb0 || vt==0x1a07bd8 || vt==0x19f0e48 || vt==0x19ed970; }   // 0x19f0e48: prep wheel System -> Options / Guide
 // Recent hand owners. Some screens leave G+0x58 empty after a message box closes (shop: "Sent ... to the convoy") until the
 // hand moves; the list under the hand is then the most recent owner that is still a visible list.
 static u64 own_hist[4];
@@ -906,7 +909,9 @@ static int hand_list_tap(u64 g,float x,float y){
     tm_log2("seeds",idx+d,arrow); return 1; }
   for(unsigned i=0;i<sizeof(hprof)/sizeof(hprof[0]);i++) if(hprof[i].vt==vt){ p=&hprof[i]; break; }
   if(!p){ // any other list that owns the hand: rows located from the hand with the learned pitch
-    { u64 h=hud(); if(h && o>=h && o<h+0x30000) return 0; } // battle HUD lists (command / map menu, weapon picker, ...): battle logic
+    // battle HUD lists (command / map menu, weapon picker, ...): battle logic. The Auto-Battle popup (vt 0x19ed970, mid-screen) is
+    // left to the generic list: the battle menu code only covers the side columns, so its taps did nothing.
+    { u64 h=hud(); if(h && o>=h && o<h+0x30000 && vt!=0x19ed970) return 0; }
     if(!is_list(o) || !widget_vis(o)) return 0;
     s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54);
     float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f;
