@@ -307,7 +307,9 @@ static int goal_cat_at(u64 o,float y){ s32 cnt=RDS32(o+0x54); if(cnt<=0||cnt>8) 
   return -1; }
 static int header_tap(u64 g,float x,float y){
   if(!hand_on(g)) return 0; u64 o; u64 vt=hand_owner_vt(g,&o);
-  if(vt==0x1a1b0b0 && inbox(x,y,1110.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // dining hall Today's Special: X Support Info
+  // right after a popup closes (shop Buy / Cancel) the game leaves G+0x58 empty while the hand is back on the list: use the list
+  if(!o){ o=own_fallback(); vt= o ? RD64(o)-g_main : 0; }
+  if(vt==0x1a1b0b0 &&inbox(x,y,1110.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // dining hall Today's Special: X Support Info
   if(vt==0x1a44a48 && inbox(x,y,1145.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // Battlefield (mission list + map, from the calendar): X Menu
   if(vt==0x1a1e048 && y>=682.f&&y<=718.f){ if(x>=790.f&&x<955.f){ press(BTN_PLUS); return 1; } if(x>=995.f&&x<1110.f){ press(BTN_X); return 1; } if(x>=1145.f&&x<=1264.f){ press(BTN_ZR); return 1; } }   // Instruct: + Auto-Instruct / X Status / ZR Classes
   if(vt==0x1a1ddc8 && y>=682.f&&y<=718.f){ if(x>=995.f&&x<1110.f){ press(BTN_X); return 1; } if(x>=1145.f&&x<=1264.f){ press(BTN_ZR); return 1; } }   // Instruct topics: X Status / ZR Classes

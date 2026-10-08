@@ -750,6 +750,7 @@ static const Seed seeds[]={
   {0x1a1a4d0, 53.33f, 0.f},         // monastery map -> X Locate: People / Facilities list
   {0x1a22378, 34.67f, 0.f, 3.5f},   // pause menu -> Quests: quest list (hand 3.5 px above a row's middle)
   {0x1a483c8, 33.3f, 0.f, 3.2f},    // Storehouse: Sell / Cancel popup
+  {0x1a44a48, 34.67f, 0.f, 11.8f},  // calendar -> Battle: Battlefield mission list (hand 11.8 px above a row's middle)
   {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
 };
@@ -760,7 +761,12 @@ static void set_pitch(u32 vt,float p){ Learn*l=lrn_get(vt,1); if(l) l->pitch=p; 
 static void set_xpitch(u32 vt,float p){ Learn*l=lrn_get(vt,1); if(l) l->xpitch=p; }
 static int list_col(u64 w){ return RDS32(w+0x50)-(s32)(short)(RD32(w+0x68)&0xffff); } // visible column of the selection
 static u64 li_w; static int li_row, li_col, li_stable, li_hrow, li_hcol; static float li_x, li_y, li_hx, li_hy;
+// Where visible row 0 of the active list sits (hand y, 720p), taken whenever the hand has settled. A tap that arrives while the hand
+// is still gliding to a newly selected row (e.g. the second tap of a quick double tap) is placed with it instead of the moving hand,
+// which put it a row off (it selected the next row instead of confirming). Kept only while that list stays the active one.
+static u64 g_r0_w; static float g_r0_y;
 static void learn_feed(u64 w,float ix,float iy){ // once per poll: the active list and its indicator x,y (720p), or w=0
+  if(w!=g_r0_w) g_r0_w=0;
   if(!w){ li_w=0; return; }
   if(g_learn_hold>0){ g_learn_hold--; li_w=0; return; }   // restart from a fresh baseline afterwards
   int row=list_row(w), col=list_col(w);
@@ -768,6 +774,7 @@ static void learn_feed(u64 w,float ix,float iy){ // once per poll: the active li
   if(row!=li_row || col!=li_col || iy!=li_y || ix!=li_x){ li_row=row; li_col=col; li_x=ix; li_y=iy; li_stable=0; return; }
   if(++li_stable!=4) return;           // indicator settled for 4 polls
   u32 vt=(u32)(RD64(w)-g_main);
+  { float p=learned_pitch(vt); if(p>0.f && RDS32(w+0x58)<=1){ g_r0_w=w; g_r0_y=iy-(float)row*p; } }   // 1-D lists only
   if(li_hrow!=-99999 && row!=li_hrow && col==li_hcol){ float p=(iy-li_hy)/(float)(row-li_hrow);
     if(p>15.f&&p<200.f){ set_pitch(vt,p); tm_log2("learned pitch x10",(s64)(p*10.f),(s64)vt); } }
   if(li_hrow!=-99999 && col!=li_hcol && row==li_hrow){ float p=(ix-li_hx)/(float)(col-li_hcol);
@@ -955,8 +962,11 @@ static int hand_list_tap(u64 g,float x,float y){
       int on_sel= y>=sy-14.f && y<=sy+14.f;
       if(!on_sel && cnt>1 && rt_depth==0){ q_push(idx+1<cnt?BTN_D:BTN_U,2,4); probe_later(x,y,(u32)vt,0); tm_log2("probe list",(s64)vt,cnt); return 1; }
       pitch=40.f; }
-    { const Seed*sd=seed_get((u32)vt); if(sd) hy+=sd->yoff; }
+    float yoff=0.f; { const Seed*sd=seed_get((u32)vt); if(sd) yoff=sd->yoff; } hy+=yoff;
     float f=(y-hy)/pitch; int d=(int)(f+(f>=0?0.5f:-0.5f));
+    if(!(li_w==o && li_stable>=4) && g_r0_w==o){   // the hand is still moving: place the tap from the settled row-0 position
+      float fr=(y-(g_r0_y+yoff))/pitch; int r=(int)(fr+(fr>=0?0.5f:-0.5f)); int top=(s32)(short)(RD32(o+0x68)>>16);
+      d=top+r-idx; tm_log2("list moving",d,(s64)vt); }
     if(idx+d<0||idx+d>=cnt) return 1;
     if(popup_list((u32)vt)){ g_learn_hold=20; if(d) ((SetIdxFn)(g_main+0x5de5b0))(o,idx+d); q_push(0,1,0); press(BTN_A); }
     else if(single_tap_list((u32)vt)) list_jump(o,idx+d,1); else list_pick(o,idx+d);
