@@ -1,3 +1,8 @@
+# binaries and game files
+build/
+debug/
+release/
+work/
 *.o
 *.elf
 subsdk9*
