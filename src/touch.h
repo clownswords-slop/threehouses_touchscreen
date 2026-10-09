@@ -726,6 +726,7 @@ static const Seed seeds[]={
   {0x1a07bd8, 67.2f, 0.f},     // calendar menu
   {0x1a20eb0, 34.67f, 0.f},    // Unit Appearance: options popup (Attire / In Battle)
   {0x1a21070, 34.67f, 0.f},    // Unit Appearance: attire / in-battle lists
+  {0x1a21230, 34.67f, 0.f},    // Unit Appearance: attire variants (Servants Attire -> Classic / Custom)
   {0x1a24d78, 53.33f, 0.f},    // Goals: unit list
   {0x1a24f40, 34.67f, 0.f},    // Goals: focus list
   {0x1a250f8, 34.67f, 0.f},    // Goals: custom focus skills
@@ -911,6 +912,8 @@ static int hand_list_tap(u64 g,float x,float y){
   if(vt==0x1a1e648 && inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_ZR); tm_log2("seminar classes",0,0); return 1; }
   // Certifications / Reclass class list: "X Status" ("X Details" on the Stat Changes page) left of "R Rotate", outside the list's range
   if(vt==0x1a1ee00 && inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
+  // ... and the ZL / ZR arrows on its description panel (Class Description / Stat Changes / ...)
+  if(vt==0x1a1ee00 && y>=150.f && y<=192.f){ if(x>=840.f&&x<=925.f){ press(BTN_ZL); return 1; } if(x>=1140.f&&x<=1230.f){ press(BTN_ZR); return 1; } }
   // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
   if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
