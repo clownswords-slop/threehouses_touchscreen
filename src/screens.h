@@ -42,7 +42,7 @@ static int calendar_tap(u64 g,float x,float y){
   u64 o; u64 vt=hand_owner_vt(g,&o);
   if(vt==VT_CAL_MENU){
     if(prompt_tap(x,y,cal_prompts,NP(cal_prompts))) return 1;
-    if(cal_col_at(x+47.7f)>=0 && y>=230.f && y<=640.f){ press(BTN_R); retap_later(x+47.7f,y,30); tm_log2("calendar open",(s64)x,(s64)y); return 1; }
+    if(cal_col_at(x+47.7f)>=0 && y>=230.f && y<=640.f){ press(BTN_R); retap_on_change(x+47.7f,y,30); rt_settle=1; tm_log2("calendar open",(s64)x,(s64)y); return 1; }   // replayed once the days have the hand and it stopped (a fixed 30 polls was slow; right away the step got lost while the calendar slid)
     return 0; }                                   // rows: hprof "calendar"
   if(vt==VT_CAL_POP && cal_ev_n>0){              // event-panel tap on its way: "View Schedule Details" (single item) -> A
     cal_ev_n=0; s32 cnt=RDS32(o+0x54); if(cnt==1){ press(BTN_A); if(rt_depth<2) retap_on_change(x,y,40); } tm_log2("calendar popup",cnt,0); return 1; }

@@ -755,6 +755,7 @@ static const Seed seeds[]={
   {0x1a44a48, 34.67f, 0.f, 11.8f},  // calendar -> Battle: Battlefield mission list (hand 11.8 px above a row's middle)
   {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
+  {0x1a1d6f8, 0.f, 360.f},          // Tea party: responses to the final comment (1x3 button row, timed, like the topics)
   {0x1a1c878, 53.33f, 0.f},         // Tournament organizer: unit list
   {0x1a48aa8, 34.6f, 0.f, 14.f},    // pause menu -> Storehouse: item list (hand 14 px above a row's middle)
 };
@@ -908,6 +909,8 @@ static int hand_list_tap(u64 g,float x,float y){
   if((vt==0x1a00298 || vt==0x19fff68) && widget_vis(o)){ press(BTN_A); tm_log2("tea button",(s64)vt,0); return 1; }
   // Seminar lecturer list: "ZR Classes" prompt in the corner (the list below swallowed it)
   if(vt==0x1a1e648 && inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_ZR); tm_log2("seminar classes",0,0); return 1; }
+  // Certifications / Reclass class list: "X Status" ("X Details" on the Stat Changes page) left of "R Rotate", outside the list's range
+  if(vt==0x1a1ee00 && inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
   // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
   if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
@@ -1009,17 +1012,20 @@ static int storehouse_tap(u64 g,float x,float y){
 typedef void (*MapSelFn)(u64 o,s32 idx);
 static u64 map_area_rec(u32 id){ u64 p=RD64(g_main+0x1aa9450); if(!mem_ok(p)) return 0; u64 t=RD64(p); if(!mem_ok(t)) return 0;
   for(int k=0;k<100;k++){ u64 r=RD64(t+8+(u64)k*8); if(r && mem_ok(r) && *(volatile u8*)(r+1)==id) return r; } return 0; }
-static int map_area_tap(u64 o,float x,float y){
-  s32 n=RDS32(o+0x7100), cur=RDS32(o+0x7104); if(n<=0||n>100||cur<0||cur>=n) return 0;
-  u64 rc=map_area_rec(RD32(o+0x7108+(u64)cur*4)); if(!rc) return 0;
+static int map_area_pick(u64 o,float x,float y,int*pcur){   // area index under the tap (-1 = none); *pcur = selected area
+  s32 n=RDS32(o+0x7100), cur=RDS32(o+0x7104); if(n<=0||n>100||cur<0||cur>=n) return -1; *pcur=cur;
+  u64 rc=map_area_rec(RD32(o+0x7108+(u64)cur*4)); if(!rc) return -1;
   float mx=RDF(o+0x72d4), my=RDF(o+0x72d8), sc=901.f/64000.f;
   { float e1=RDF(rc+4)*sc+182.f-mx, e2=RDF(rc+4)*sc*2.f+182.f-mx; if(e1<0)e1=-e1; if(e2<0)e2=-e2; if(e2<e1) sc*=2.f; }
   float ox=mx-RDF(rc+4)*sc, oy=my-RDF(rc+8)*sc;          // 1080p offset (182, 50) normally
   float tx=x*1.5f, ty=y*1.5f, bd=1e9f; int best=-1;
   for(int i=0;i<n;i++){ u64 r=map_area_rec(RD32(o+0x7108+(u64)i*4)); if(!r) continue;
     float dx=RDF(r+4)*sc+ox-tx, dy=RDF(r+8)*sc+oy-ty, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=i; } }
-  if(best<0 || bd>75.f*75.f) return 0;                  // within 50 px (720p) of an area marker
-  if(best==cur){ press(BTN_A); tm_log2("map area A",best,n); return 1; }
+  if(best<0 || bd>75.f*75.f) return -1;                 // within 50 px (720p) of an area marker
+  return best; }
+static int map_area_tap(u64 o,float x,float y){
+  int cur=-1, best=map_area_pick(o,x,y,&cur); if(best<0) return 0;
+  if(best==cur){ press(BTN_A); tm_log2("map area A",best,cur); return 1; }
   ((MapSelFn)(g_main+0x2b2fa0))(o,best); tm_log2("map area",best,cur); return 1; }
 // Monastery map (R): People / Facilities tabs (ZL/ZR), X Locate in the corner. The map widget is the hand owner
 // (vtable main+0x1a1a688) even though the hand itself is hidden; its tab index sits 0x5ff8 bytes before it.
@@ -1048,13 +1054,35 @@ static int map_tap(u64 g,float x,float y){
   return 1;   // nothing else on this screen: no stray A (it asks to fast-travel)
 }
 // Map -> X Locate: the People / Facilities list (vt 0x1a1a4d0, rows 53.33 apart, the hand ~4 px below a row's middle). A tap selects the
-// person / facility (the map shows where); A there leaves Locate, so a tap never presses it. A tap on the map goes back first (B).
+// person / facility (the map shows where); A there leaves Locate, so a tap never presses it. A tap on an area of the map selects it
+// right away (the map widget, 0x64f8 bytes after the list, keeps the selection when B leaves Locate) and B goes back; the area that is
+// already selected = B, then A (as on the map screen). Elsewhere on the map: B, then the tap again (it used to wait 15 polls for every tap).
 static int map_list_tap(u64 g,float x,float y){
   u64 o=RD64(g+G_HAND_OWNER); if(!hand_on(g) || !mem_ok(o) || RD64(o)!=g_main+0x1a1a4d0 || !widget_vis(o)) return 0;
-  if(x<800.f){ if(rt_depth==0){ press(BTN_B); retap_later(x,y,15); } return 1; }
+  if(x<800.f){ u64 m=o+0x64f8; int cur=-1, best= (mem_ok(m) && RD64(m)==g_main+0x1a1a688) ? map_area_pick(m,x,y,&cur) : -1;
+    if(best>=0){ if(best!=cur) ((MapSelFn)(g_main+0x2b2fa0))(m,best); press(BTN_B); if(best==cur) press(BTN_A); tm_log2("locate -> area",best,cur); return 1; }
+    if(rt_depth==0){ press(BTN_B); retap_later(x,y,15); } return 1; }
   s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>60||idx<0||idx>=cnt||x<860.f||x>1240.f) return 1;
   float hy=RDF(g+0x30)/1.5f, f=(y-(hy-4.f))/53.33f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int t=idx+d; if(t<0||t>=cnt) return 1;
   if(t!=idx) list_jump(o,t,0); tm_log2("map locate",t,idx); return 1; }
+// Tea party after a perfect tea time: the "Extra Time" menu (hand owner vt 0x19ffdd8: Observe / Gifts / End, buttons 80 px apart, the
+// selected one at owner+0x208, the hand 6 px above a button's middle; a list with count 0, so the generic list skipped it and taps fell
+// through to A on the selected button) and Observe (the same owner, hand hidden). Observe: "B Back", and a reaction bubble on the left
+// (widget vt 0x1a00100 at owner+0x536b8: +0x80 reaction 0 Nod (A) / 1 Joke (Y) / 2 Banter (X), +0x84/+0x88 position (1080p);
+// its fade value +0x8c pulses through 0 while shown, so it is not checked: nothing else in Observe uses A / X / Y); other taps do nothing (A would nod), a drag turns the camera ("R Move Camera").
+static u64 tea_extra(u64 g){ u64 o=RD64(g+G_HAND_OWNER); return (mem_ok(o) && RD64(o)==g_main+0x19ffdd8 && widget_vis(o)) ? o : 0; }
+static int tea_extra_tap(u64 g,float x,float y){
+  u64 o=tea_extra(g); if(!o) return 0;
+  if(hand_on(g)){ s32 idx=RDS32(o+0x208); if(idx<0||idx>2) return 1;
+    float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f; if(x<hx-30.f||x>hx+320.f) return 1;
+    float f=(y-(hy+6.f))/80.f; int t=idx+(int)(f+(f>=0?0.5f:-0.5f)); if(t<0||t>2) return 1;
+    if(t!=idx){ *(volatile s32*)(o+0x208)= t>idx ? t-1 : t+1; q_push(t>idx?BTN_D:BTN_U,2,3); }   // instant: next to it, one real step
+    press(BTN_A); tm_log2("extra time",t,idx); return 1; }
+  if(inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_B); tm_log2("observe back",0,0); return 1; }
+  u64 bw=o+0x536b8;
+  if(mem_ok(bw) && RD64(bw)==g_main+0x1a00100){ float bx=RDF(bw+0x84)/1.5f, by=RDF(bw+0x88)/1.5f; s32 k=RDS32(bw+0x80);
+    if(k>=0 && k<=2 && x>=bx-15.f && x<=bx+150.f && y>=by-15.f && y<=by+50.f){ press(k==0?BTN_A:k==1?BTN_Y:BTN_X); tm_log2("observe react",k,0); return 1; } }
+  return 1; }
 // Birthday picker (new game intro). Its state lives outside the common UI object, so the screen is recognised by
 // the help bar (G+0x2cf8, vtable main+0x1a43568, UTF-8 text at +0x3e) reading "Enter your birthday".
 // Left/Right pick the Month or Day field (they don't wrap), Up/Down change the value.
@@ -1100,7 +1128,7 @@ static void on_tap(float x,float y){
   if(title_menu_tap(x,y)) return;
   { u64 g=cmn_ui(); if(g && (talk_tap(g,x,y) || screens_tap(g,x,y))) return; }
   if(items_tap(x,y)) return;
-  { u64 g=cmn_ui(); if(g && (storehouse_tap(g,x,y) || map_tap(g,x,y) || map_list_tap(g,x,y) || hand_list_tap(g,x,y) || hl_list_tap(g,x,y) || birthday_tap(g,x,y))) return; }
+  { u64 g=cmn_ui(); if(g && (storehouse_tap(g,x,y) || tea_extra_tap(g,x,y) || map_tap(g,x,y) || map_list_tap(g,x,y) || hand_list_tap(g,x,y) || hl_list_tap(g,x,y) || birthday_tap(g,x,y))) return; }
   // info pop-ups flagged only by G+0x60ab8 that no screen above took: tap anywhere closes them (arrows turn pages)
   { u64 g=cmn_ui(); if(g && RDS32(g+0x60ab8)!=0){
       if(y>=555.f&&y<=605.f&&x>=530.f&&x<=625.f){ q_push(BTN_L,2,3); return; }
@@ -1217,6 +1245,10 @@ static void on_tap(float x,float y){
     { int cx,cy; cursor_get(&cx,&cy); u64 u=RD64(b+0x3b60);
       if(u && mem_ok(u) && *(volatile u8*)(u+0xf2)==(u8)cx && *(volatile u8*)(u+0xf3)==(u8)cy){ q_push(BTN_A,2,3); } }
     return; }
+  // fighting tournament: the arena is a 2x2 map (bounds 0,0 - 2,2). The "Congratulations!" screen after the last win has no widget of
+  // its own and waits for A (B does nothing there); during a fight A is the game's own fast-forward. The reward banners also close on A.
+  if(in_battle && (phase==10||phase==11) && RDS32(b+0x3b18)==0 && RDS32(b+0x3b1c)==0 && RDS32(b+0x3b20)==2 && RDS32(b+0x3b24)==2){
+    q_push(BTN_A,2,3); tm_log2("tournament A",(s64)x,(s64)y); return; }
   if(in_battle && (phase==10||phase==11)){ q_push(BTN_B,2,3); return; }
   if(in_battle && phase==3){ menu_tap(x,y); return; }
   q_push(BTN_A,2,3);
@@ -1275,6 +1307,7 @@ static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   // model turns it like Unit Appearance (the list on the left keeps its taps; a touch that doesn't move is still a tap)
   { u64 o; if(hand_on(g) && hand_owner_vt(g,&o)==0x1a1ee00 && widget_vis(o) && t_x>=330.f && t_x<=900.f && t_y>=90.f && t_y<=650.f) return 2; }
   if(hand_on(g)) return 0;
+  if(tea_extra(g)) return 2;                        // tea party Observe ("R Move Camera")
   if(is_widget(g+0x31120,0x1a44f48)) return 1;    // free-roam HUD up: Byleth is under direct control
   { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;     // battle map, nothing open: drag moves the map cursor
     if(b && h && cam_obj() && RDS32(b+0x3b20)>0 && (ph==0||ph==1||ph==30) && !widget_vis(h+0x1068) && !widget_vis(h+0xab8)
