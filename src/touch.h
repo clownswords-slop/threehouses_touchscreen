@@ -642,7 +642,9 @@ static int convoy_tap(u64 g,float x,float y){
     tm_log2("convoy row",rt,rc); return 1; }
   // unit item list
   if(x>=110.f&&x<=490.f&&y>=268.f&&y<=500.f){
-    if(foc){ for(int i=0;i<=tab;i++) q_push(BTN_L,1,3); retap_later(x,y,6); return 1; }
+    // back to the unit list: Left on the first tab moves the focus there (on other tabs Left changes tab). Instant: the tab next to
+    // the first one, one real step loads the first tab, one more moves the focus (walking every tab flipped through all of them)
+    if(foc){ if(tab>1) *(volatile s32*)(g+CV_TAB)=1; if(tab>0) q_push(BTN_L,2,3); q_push(BTN_L,1,3); retap_later(x,y,6); return 1; }
     rows_pick(ul,x,y,110.f,490.f,286.6f,35.2f,"unit items"); return 1; }
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
@@ -753,6 +755,8 @@ static const Seed seeds[]={
   {0x1a44a48, 34.67f, 0.f, 11.8f},  // calendar -> Battle: Battlefield mission list (hand 11.8 px above a row's middle)
   {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
+  {0x1a1c878, 53.33f, 0.f},         // Tournament organizer: unit list
+  {0x1a48aa8, 34.6f, 0.f, 14.f},    // pause menu -> Storehouse: item list (hand 14 px above a row's middle)
 };
 static const Seed* seed_get(u32 vt){ for(unsigned i=0;i<sizeof(seeds)/sizeof(seeds[0]);i++) if(seeds[i].vt==vt) return &seeds[i]; return 0; }
 static float learned_pitch(u32 vt){ Learn*l=lrn_get(vt,0); if(l&&l->pitch>0.f) return l->pitch; const Seed*d=seed_get(vt); return d?d->pitch:0.f; }
@@ -904,6 +908,8 @@ static int hand_list_tap(u64 g,float x,float y){
   if((vt==0x1a00298 || vt==0x19fff68) && widget_vis(o)){ press(BTN_A); tm_log2("tea button",(s64)vt,0); return 1; }
   // Seminar lecturer list: "ZR Classes" prompt in the corner (the list below swallowed it)
   if(vt==0x1a1e648 && inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_ZR); tm_log2("seminar classes",0,0); return 1; }
+  // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
+  if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
   if(vt==0x1a436f8 && y<115.f){ // Units list header: ZL / ZR page arrows, "R Your Units / Enemy Units"
@@ -1027,12 +1033,14 @@ static int map_tap(u64 g,float x,float y){
   if(y>=682.f&&y<=718.f){ if(x>=736.f&&x<=922.f){ press(BTN_PLUS); return 1; } if(x>=975.f&&x<=1080.f){ press(BTN_X); return 1; }
     if(x>=1129.f&&x<=1264.f){ press(BTN_A); return 1; } return 1; }
   // the People / Facilities list on the right (vt 0x1a1a4d0, 0x64f8 bytes before the map widget; rows 53.33 apart, row 0's middle at
-  // y 194 unscrolled): its index is set first (SetIndex keeps it when Locate opens), then X: Locate opens with the hand already on
-  // the tapped name and the map showing them, no replay. Fallback: X, then replay the tap on the list (map_list_tap).
+  // y 194 unscrolled; on Facilities the resources start below the description, row 0 at y 354 whatever its length): its index is set
+  // first (SetIndex keeps it when Locate opens), then X: Locate opens with the hand already on the tapped name and the map showing
+  // them, no replay. Fallback: X, then replay the tap on the list (map_list_tap).
   if(x>=860.f&&x<=1240.f&&y>=165.f&&y<=640.f){
     u64 l=o-0x64f8;
     if(mem_ok(l) && RD64(l)==g_main+0x1a1a4d0){ s32 cnt=RDS32(l+0x54), top=(s32)(short)(RD32(l+0x68)>>16);
-      float f=(y-194.f)/53.33f; int t=top+(int)(f+(f>=0?0.5f:-0.5f));
+      float y0= RDS32(o-0x5ff8)==1 ? 354.f : 194.f; if(y<y0-27.f) return 1;   // the facility's description: nothing to locate
+      float f=(y-y0)/53.33f; int t=top+(int)(f+(f>=0?0.5f:-0.5f));
       if(cnt>0 && cnt<=60 && t>=0 && t<cnt){ ((SetIdxFn)(g_main+0x5de5b0))(l,t); press(BTN_X); tm_log2("map name",t,cnt); return 1; }
       if(cnt>=0 && cnt<=60) return 1; }   // below the last name (or nobody there): nothing to locate
     if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,30); } return 1; }
@@ -1099,6 +1107,12 @@ static void on_tap(float x,float y){
       if(y>=555.f&&y<=605.f&&x>=650.f&&x<=745.f){ q_push(BTN_R,2,3); return; }
       q_push(BTN_B,2,3); return; } }
   { u64 g=cmn_ui(); if(g && freeroam_corner_tap(g,x,y)) return; }
+  // fighting tournament (tournament organizer): the round screen between fights (G+0x606a0, vt 0x19f2ca8), which also shows the
+  // WIN / LOSE result, runs as battle phase 11, where taps pressed B (nothing happens there). Prompts in the corner: X Restore HP,
+  // B Withdraw (from round 2 on), A Confirm; any other tap = A (starts the fight; the result waits for A).
+  { u64 g=cmn_ui(); if(g && !hand_on(g) && is_widget(g+0x606a0,0x19f2ca8) && (phase==10||phase==11||!hud())){
+      u64 bt=BTN_A; if(y>=682.f&&y<=718.f){ if(x>=718.f&&x<=920.f) bt=BTN_X; else if(x>=957.f&&x<=1100.f) bt=BTN_B; }
+      press(bt); tm_log2("tournament",(s64)bt,(s64)x); return; } }
   // the battle object and phase linger outside battles (title, intro), so also require the battle HUD
   int in_battle = b && cam_obj() && RDS32(b+0x3b20)>0 && hud();
   // Divine Pulse (phase 17): the log of past actions on the right is a wheel: the selected entry stays at y 221 and the list
