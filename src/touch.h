@@ -184,8 +184,10 @@ static void cursor_get(int*x,int*y){ u64 b=battle(); *x=RDS32(b+4); *y=RDS32(b+8
 // "learned" those jumps as the d-pad directions. A chase therefore never starts in phase 2 and stops when the phase changes
 // (e.g. the A at the end of a move turns into target selection while steps are still queued).
 static s32 chase_ph;
+static void dmap_from_cam(void);
 static int chase_phase_ok(s32 ph){ return ph==0 || ph==1 || ph==30; }
 static void chase_start(int tx,int ty,int then_a){ u64 b=battle(); s32 ph= b ? RDS32(b+0x3cc0) : -1; if(!chase_phase_ok(ph)){ chase_on=0; tm_log2("chase refused",ph,0); return; }
+  dmap_from_cam();   // the d-pad turns with the camera
   chase_ph=ph; chase_maxsteps=80; chase_maxfail=6; chase_on=1; chase_tx=tx; chase_ty=ty; chase_steps=0; chase_fail=0; chase_then_a=then_a; chase_wait=0; chase_lastbtn=0; cursor_get(&chase_lastx,&chase_lasty); }
 
 // Target selection fallback: one Right step at a time (each moves to the next target in the game's order), checked after every
@@ -282,6 +284,21 @@ static int pick_tile_old(float tx,float ty,int*ox,int*oy);
 static int proj_pt(volatile float*m,float x,float y,float z,float*sx,float*sy,float*w){
   float cw=x*m[3]+y*m[7]+z*m[11]+m[15]; if(cw<1.f) return 0;
   *sx=((x*m[0]+y*m[4]+z*m[8]+m[12])/cw*0.5f+0.5f)*1280.f; *sy=(0.5f-(x*m[1]+y*m[5]+z*m[9]+m[13])/cw*0.5f)*720.f; *w=cw; return 1; }
+// The d-pad moves the battle cursor relative to the camera (the game rounds the camera's turn to the nearest quarter: at 60 degrees
+// Up already moves +x). The fixed north mapping made the jump-next-to-the-target-and-step taps land on the wrong tile (no A) once the
+// camera was turned. Each direction gets the neighbour tile whose projection points most that way on screen.
+static void dmap_from_cam(void){
+  u64 c=cam_obj(); u64 b=battle(); if(!c||!b) return;
+  u64 po=RD64(g_main+0x1aa8198), pz=RD64(g_main+0x1aa81a0); if(!po||!pz) return;
+  volatile float*m=(volatile float*)(c+0x170); float h=RDF(c+0x94);
+  float x0=RDF(po)+((float)RDS32(b+4)+0.5f)*1000.f, z0=RDF(pz)+((float)RDS32(b+8)+0.5f)*1000.f, sx0,sy0,sx1,sy1,sx2,sy2,w;
+  if(!proj_pt(m,x0,h,z0,&sx0,&sy0,&w) || !proj_pt(m,x0+1000.f,h,z0,&sx1,&sy1,&w) || !proj_pt(m,x0,h,z0+1000.f,&sx2,&sy2,&w)) return;
+  float ex=sx1-sx0, ey=sy1-sy0, fx=sx2-sx0, fy=sy2-sy0;   // screen offset of one tile in +x / +y
+  static const int ddx[4]={1,-1,0,0}, ddy[4]={0,0,1,-1};
+  static const float wantx[4]={0.f,0.f,-1.f,1.f}, wanty[4]={-1.f,1.f,0.f,0.f};   // U D L R on screen
+  for(int k=0;k<4;k++){ int best=0; float bs=-1e30f;
+    for(int i=0;i<4;i++){ float s=(ddx[i]*ex+ddy[i]*fx)*wantx[k]+(ddx[i]*ey+ddy[i]*fy)*wanty[k]; if(s>bs){ bs=s; best=i; } }
+    dmap_dx[k]=ddx[best]; dmap_dy[k]=ddy[best]; } }
 static int g_box_hit; // debug: 1 if the last box pick was inside a quad
 // main+0xf6a60 is the game's own terrain height lookup for the map cursor: (unused, float pos[4]) -> height.
 // It picks the right layer for bridges/water the same way the cursor does.
@@ -875,7 +892,7 @@ static void own_track(void){ u64 g=cmn_ui(); if(!g || !hand_on(g)) return; u64 o
   for(int i=3;i>0;i--) own_hist[i]=own_hist[i-1]; own_hist[0]=o; }
 static u64 own_fallback(void){ for(int i=0;i<4;i++){ u64 o=own_hist[i]; if(o && is_list(o) && widget_vis(o)) return o; } return 0; }
 // Units / Unit Info table (vt 0x1a436f8): Up from the first row puts the hand on the column headers, Left / Right walk the
-// columns (crossing into the next page), A sorts by the column (again = the other way round). owner+0x710 = 1 while the hand
+// columns (crossing into the next page), A sorts by the column (again = the other way round). owner+0x710 (byte) = 1 while the hand
 // is on the headers, +0x508 = column (numbered across all pages: every page starts with its Name column), +0x50c = page
 // (ZL / ZR), +0x510/+0x514 = the hand's spot (1080p). Instant: header mode on, the column next to the target, one real
 // Left / Right step (the game moves the hand there), then A. Column hand x (720p) per page, measured:
@@ -891,12 +908,12 @@ static const UnitsPage units_pages[6]={
 static float units_colx(const UnitsPage*p,int k){ return p->pitch>0.f ? p->x0+p->pitch*(float)k : p->xs[k]; }
 static void press(u64 b);
 static int units_sort_tap(u64 o,float x,float y){
-  int hdr=RDS32(o+0x710)!=0; s32 pg=RDS32(o+0x50c), cc=RDS32(o+0x508);
+  int hdr=*(volatile u8*)(o+0x710)!=0; s32 pg=RDS32(o+0x50c), cc=RDS32(o+0x508);   // +0x710 is a byte: +0x711 is 1 in battle prep Unit Info (an s32 read 0x100 there)
   if(y>=128.f && y<=170.f){ if(pg<0||pg>5||x<80.f||x>1172.f) return 1;
     const UnitsPage*p=&units_pages[pg]; int t=p->name;            // left of the first data column: Name
     for(int k=0;k<p->n;k++) if(x>=units_colx(p,k)+10.f) t=p->name+1+k;
     if(hdr && cc==t){ press(BTN_A); tm_log2("units sort again",t,pg); return 1; }
-    *(volatile s32*)(o+0x710)=1;
+    *(volatile u8*)(o+0x710)=1;
     if(t==p->name){ *(volatile s32*)(o+0x508)=t+1; q_push(BTN_L,2,4); } else { *(volatile s32*)(o+0x508)=t-1; q_push(BTN_R,2,4); }
     press(BTN_A); tm_log2("units sort",t,pg); return 1; }
   if(hdr && y>170.f && y<=600.f){ if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }   // a row while the hand is on the headers: back down first
@@ -1178,7 +1195,7 @@ static void on_tap(float x,float y){
         if(!want_a){ if(!set_cursor_instant(tx,ty)) chase_start(tx,ty,0); }
         else { // the swap target only registers after a real d-pad step (as with phase 1): land next to it, step, then A
           int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24); int done=0;
-          for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
+          dmap_from_cam(); for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
             if(nx==cx&&ny==cy){ q_push(dbtn[k],1,2); done=1; break; }
             if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,2); done=1; } }
           if(done) wait_then_a(tx,ty); else chase_start(tx,ty,1); }
@@ -1201,7 +1218,7 @@ static void on_tap(float x,float y){
         move_confirmed();
         // jump next to the target, then take one real d-pad step so the game recomputes the move path
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
-        for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
+        dmap_from_cam(); for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
           if(nx==cx&&ny==cy){ q_push(dbtn[k],1,2); done=1; break; }
           if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,2); done=1; } }
         if(done) wait_then_a(tx,ty); else chase_start(tx,ty,1);
@@ -1304,6 +1321,17 @@ static u64 hold_tick(void){
 // less than CAM_TAP px is still a tap.
 #define CAM_TAP 14.f
 static int t_cam; static float cam_lx, cam_ly, cam_vx, cam_vy, cam_dist; static s32 g_rs_x, g_rs_y;
+// Battle camera (eye +0x80, look-at +0x90): eye-to-look-at distance (about 970 over the shoulder, 7900 default, 12000 zoomed out)
+// and the sine of the pitch (0.52 lowest .. 0.97 highest in the default view).
+static float fsqrt(float d){ if(d<=0.f) return 0.f; float s=d>1.f?d:1.f; for(int i=0;i<24;i++) s=0.5f*(s+d/s); return s; }
+static float cam_eye_dist(void){ u64 c=cam_obj(); if(!c) return 1e9f; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98); return fsqrt(dx*dx+dy*dy+dz*dz); }
+static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=RDF(c+0x84)-RDF(c+0x94), d=cam_eye_dist(); return d>1.f ? dy/d : -2.f; }
+// Battle camera drag in the two zoom levels with the tile cursor (t_cam 4). The game turns this camera in 30-degree steps, one per
+// right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 192 px (15 % of the width) of horizontal
+// drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). The tilt follows the finger
+// linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.0012 per px dragged down) with the right stick (the stick
+// has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
+static float cam_sp0; static int cam_steps, cam_push, cam_pdir, cam_cool;
 static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   if(appearance_screen(g)) return 2;
   // Certifications / Reclass class list (vt 0x1a1ee00) with the unit's model in the middle ("R Rotate"): a drag that starts on the
@@ -1312,9 +1340,14 @@ static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   if(hand_on(g)) return 0;
   if(tea_extra(g)) return 2;                        // tea party Observe ("R Move Camera")
   if(is_widget(g+0x31120,0x1a44f48)) return 1;    // free-roam HUD up: Byleth is under direct control
-  { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;     // battle map, nothing open: drag moves the map cursor
+  { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;
+    if(b && h && cam_obj() && ph==15) return 5;                     // View Unit (Details -> +): the camera orbits the class model
+    // battle map, nothing open: the prep map (30) drags the cursor; in the fight a drag moves the camera (over the shoulder freely,
+    // in the two zoom levels with the tile cursor in 30-degree turns plus a linear tilt)
     if(b && h && cam_obj() && RDS32(b+0x3b20)>0 && (ph==0||ph==1||ph==30) && !widget_vis(h+0x1068) && !widget_vis(h+0xab8)
-       && !widget_vis(g+0xe00) && !*(volatile u8*)(g+0x302e1) && RDS32(g+0x60ab8)==0 && !is_widget(g+0xf1eb4,0x1a2e688)) return 3; }
+       && !widget_vis(g+0xe00) && !*(volatile u8*)(g+0x302e1) && RDS32(g+0x60ab8)==0 && !is_widget(g+0xf1eb4,0x1a2e688)){
+      if(ph==30) return 3;
+      return cam_eye_dist()<3000.f ? 6 : 4; } }
   return 0; }
 // Battle cursor drag (t_cam 3): every poll the tile under the finger is picked on the grid plane; when it changes the
 // cursor jumps there with the game's SetCursor (phase 0), or lands next to it and takes one real d-pad step so the
@@ -1328,6 +1361,7 @@ static void drag_cursor_tick(void){
   if(tx==dc_x&&ty==dc_y) return; int cx,cy; cursor_get(&cx,&cy); dc_x=tx; dc_y=ty; if(cx==tx&&cy==ty) return;
   if(ph==0||ph==30){ set_cursor_instant(tx,ty); return; }
   int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24);
+  dmap_from_cam();
   for(int k=0;k<4;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
     if(nx==cx&&ny==cy){ q_push(dbtn[k],1,1); return; }
     if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,1); return; } }
@@ -1340,6 +1374,17 @@ static void cam_tick(void){
   float tx=t_x-t_x0, ty=t_y-t_y0; float d2=tx*tx+ty*ty; if(d2>cam_dist) cam_dist=d2;
   if(cam_dist<CAM_TAP*CAM_TAP){ g_rs_x=g_rs_y=0; return; }
   if(t_cam==3){ g_rs_x=g_rs_y=0; drag_cursor_tick(); return; }
+  if(t_cam==4){
+    int want=(int)((t_x-t_x0)/-192.f);
+    if(cam_push>0){ cam_push--; g_rs_x=cam_pdir*32000; if(!cam_push) cam_cool=6; }
+    else { g_rs_x=0; if(cam_cool>0) cam_cool--; else if(want!=cam_steps){ cam_pdir= want>cam_steps ? 1 : -1; cam_steps+=cam_pdir; cam_push=7; g_rs_x=cam_pdir*32000; } }
+    float sp=cam_sinpitch(), tgt=cam_sp0-(t_y-t_y0)*0.0012f; if(tgt<0.5f) tgt=0.5f; if(tgt>0.97f) tgt=0.97f;
+    float e=sp-tgt, a= e<0.f ? -e : e;
+    if(sp<-1.5f || cam_sp0<-1.5f || a<0.004f || g_rs_x) g_rs_y=0;
+    else { float o=9000.f+23000.f*(a/0.03f); if(o>32767.f) o=32767.f; g_rs_y=(s32)(e>0.f ? o : -o); }
+    return; }
+  if(t_cam==5){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }     // View Unit: like the model turntable, both axes
+  if(t_cam==6){ g_rs_x=cam_axis(-cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }    // over the shoulder: free turn and tilt
   if(t_cam==2){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=0; }          // model turntable: horizontal only
   else { // free roam: horizontal 18x the finger speed (2x the old 9x), vertical 0.75x of the old response (gain and top deflection)
     g_rs_x=cam_axis(-cam_vx*18.f,2000.f); g_rs_y=(s32)((float)cam_axis(cam_vy*9.f,1400.f)*0.75f); }
@@ -1349,7 +1394,7 @@ static void touch_update(TouchScreenState1*ts){
   if(ts->count>0){
     float x=(float)ts->t[0].x, y=(float)ts->t[0].y;
     if(!t_down){ g_touch_mode=1; t_down=1; t_settle=2; t_p0=g_poll; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; t_t0=now; t_long=0; t_swiped=0;
-      t_cam=cam_screen(); dc_x=dc_y=-1; cam_freeze(0); cam_lx=x; cam_ly=y; cam_vx=cam_vy=0.f; cam_dist=0.f; return; }
+      t_cam=cam_screen(); if(t_cam==4){ cam_sp0=cam_sinpitch(); cam_steps=0; cam_push=0; cam_cool=0; } dc_x=dc_y=-1; cam_freeze(0); cam_lx=x; cam_ly=y; cam_vx=cam_vy=0.f; cam_dist=0.f; return; }
     if(t_settle>0){ t_settle--; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; cam_lx=x; cam_ly=y; return; }
     t_x=x; t_y=y;
     if(t_cam) return;                     // camera drag: no d-pad swipes
