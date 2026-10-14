@@ -1342,11 +1342,10 @@ static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   if(is_widget(g+0x31120,0x1a44f48)) return 1;    // free-roam HUD up: Byleth is under direct control
   { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;
     if(b && h && cam_obj() && ph==15) return 5;                     // View Unit (Details -> +): the camera orbits the class model
-    // battle map, nothing open: the prep map (30) drags the cursor; in the fight a drag moves the camera (over the shoulder freely,
-    // in the two zoom levels with the tile cursor in 30-degree turns plus a linear tilt)
+    // battle map (fight 0 / 1, prep map 30), nothing open: a drag moves the camera (over the shoulder freely, in the two zoom levels
+    // with the tile cursor in 30-degree turns plus a linear tilt; the prep map has the same camera and only those two levels)
     if(b && h && cam_obj() && RDS32(b+0x3b20)>0 && (ph==0||ph==1||ph==30) && !widget_vis(h+0x1068) && !widget_vis(h+0xab8)
        && !widget_vis(g+0xe00) && !*(volatile u8*)(g+0x302e1) && RDS32(g+0x60ab8)==0 && !is_widget(g+0xf1eb4,0x1a2e688)){
-      if(ph==30) return 3;
       return cam_eye_dist()<3000.f ? 6 : 4; } }
   return 0; }
 // Battle cursor drag (t_cam 3): every poll the tile under the finger is picked on the grid plane; when it changes the
