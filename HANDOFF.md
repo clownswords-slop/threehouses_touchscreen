@@ -1,9 +1,9 @@
 # FE3H touch controls mod: handoff notes
 
-Last updated: 2026-10-14, eighteenth session, part 2.
+Last updated: 2026-10-14, eighteenth session, part 3.
 
 ## Current state
-- **Installed (for playing):** RELEASE md5 e4ee9e3d... + ORIGINAL `main.npdm` (02eb7bbf..., same as `work\main.npdm`) in `%APPDATA%\Ryujinx\mods\contents\010055d009f78000\TouchControls\exefs\`. For debugging, install `claude_touchmod\debug\subsdk9` (bca75ded...) with the patched `debug\main.npdm` (f7178149...).
+- **Installed (for playing):** RELEASE md5 eab18f75... + ORIGINAL `main.npdm` (02eb7bbf..., same as `work\main.npdm`) in `%APPDATA%\Ryujinx\mods\contents\010055d009f78000\TouchControls\exefs\`. For debugging, install `claude_touchmod\debug\subsdk9` (85af2b99...) with the patched `debug\main.npdm` (f7178149...).
 - **Builds:** `claude_touchmod\release\TouchControls\exefs\subsdk9` = release, `claude_touchmod\debug\subsdk9` = debug. Both from the current `src`.
 - **Saves:** File 1 = the user's (Hard/Classic, White Clouds Ch. 1, 4/30 "Preparations": loads straight into Battle Prep). Autosave = the user's 4/30 "Before Battle" (loads into the pre-battle cutscene with Dimitri, then a tutorial, then Battle Prep). File 2 = user's (Prologue 4/20). File 3 = test save, prologue battle. File 4 = test save, Ch. 1 in front of Rhea. File 5 = Reception Hall, house leaders. File 6 = 2nd floor next to the audience chamber (house choice). File 7 = now the user's Red Canyon battle (Ch. 2 mission): loads into Battle Prep (`tools/tobattle.sh` taps Fight! -> Yes -> conditions -> opening lines, ends in phase 0, turn 1). File 8 = dining hall, 0 activity points. File 9 = library. Never write to the autosave, File 1, File 2 or File 7.
   - **The game autosaves by itself** when a free day ends ("Finish Exploring" -> calendar) and possibly when a battle starts. In session 7 that overwrote the autosave twice; it was restored from `claude_save_backup\0000000000000004_20261003_session7` (only `auto` and `system` in both `0\` and `1\` differ; copy them back with Ryujinx stopped). Back up before testing, and restore after anything that ends a day or starts a battle.
@@ -11,6 +11,11 @@ Last updated: 2026-10-14, eighteenth session, part 2.
   - `system` file format: u32 at 0 = byte sum of everything from offset 0xC; slot summaries are 0x74 bytes each at 0x0C (autosave), 0x80 (File 1), 0xF4 (File 2), 0x168 (File 3), 0x1DC (File 4).
 - **Ryujinx config:** "Direct Mouse Access" must stay OFF so clicks become touches. Keyboard: left stick T/F/G/H, right stick I/J/K/L, A Keypad2, B Keypad8, X = X, d-pad W/A/S/D, ZL Q, ZR E, L ShiftLeft, R Space.
 - **Walking in the monastery:** hold T/F/G/H to move Byleth (left stick) and I/J/K/L to turn the camera (right stick) with `computer_hold_key` (e.g. `"t"`, `"t+h"`, 0.3-2 s). The camera swings behind Byleth while walking, so take short steps and re-check with a screenshot; NPC/object markers (yellow diamonds) and name labels show what A will talk to. The minimap turns with the camera (up = camera forward). Debug builds also have `ls x y n` (left stick override for n polls). Keypad keys cannot be sent by the computer tool; inject buttons with `cmd.sh "btn <mask> 8"` instead.
+
+## Changes in the eighteenth session, part 3 (2026-10-14)
+- **Dragging off the screen edge turned the battle camera back and tilted it**: measured (temporary log) that once the pointer leaves the game area Ryujinx keeps the touch held but reports it at (0, 0), which read as a long drag up and left. `touch_update` now ignores (0, 0) samples while a touch is held (keeps the last real position; applies to every screen). Tested: a drag to the right edge and past it = 2 turn steps, no tilt; up past the top edge = tilt by the on-screen part only.
+- **40 px dead zone before the tilt starts** in battle drag mode 4 (fight and prep map), so a sideways drag doesn't tilt. Tested: ~11 px of vertical wobble left the pitch unchanged.
+Release eab18f75..., debug 85af2b99...
 
 ## Changes in the eighteenth session, part 2 (2026-10-14)
 - **Battle prep map (phase 30) drag = camera too** (user asked for the same as the fight if the controls match): measured the same camera there (30-degree turn steps per push, smooth tilt; only the default and "- Zoom Out" levels, no over-the-shoulder), so `cam_screen` gives phase 30 mode 4 as well. The cursor drag (mode 3, `drag_cursor_tick`) is now unused. Tested on File 23: a diagonal drag turned two steps and tilted +0.223 (expected 0.223), cursor untouched; tap a unit on a deployment square then another = swap, with the camera turned -60 degrees. Note: Byleth stands outside the deployment squares in this battle, so A on him picks nothing (game rule, not a bug).

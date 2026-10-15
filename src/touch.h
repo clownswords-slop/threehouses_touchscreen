@@ -1328,8 +1328,8 @@ static float cam_eye_dist(void){ u64 c=cam_obj(); if(!c) return 1e9f; float dx=R
 static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=RDF(c+0x84)-RDF(c+0x94), d=cam_eye_dist(); return d>1.f ? dy/d : -2.f; }
 // Battle camera drag in the two zoom levels with the tile cursor (t_cam 4). The game turns this camera in 30-degree steps, one per
 // right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 192 px (15 % of the width) of horizontal
-// drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). The tilt follows the finger
-// linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.0012 per px dragged down) with the right stick (the stick
+// drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). After a 40 px dead zone the
+// tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.0012 per px dragged down) with the right stick (the stick
 // has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
 static float cam_sp0; static int cam_steps, cam_push, cam_pdir, cam_cool;
 static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
@@ -1377,7 +1377,8 @@ static void cam_tick(void){
     int want=(int)((t_x-t_x0)/-192.f);
     if(cam_push>0){ cam_push--; g_rs_x=cam_pdir*32000; if(!cam_push) cam_cool=6; }
     else { g_rs_x=0; if(cam_cool>0) cam_cool--; else if(want!=cam_steps){ cam_pdir= want>cam_steps ? 1 : -1; cam_steps+=cam_pdir; cam_push=7; g_rs_x=cam_pdir*32000; } }
-    float sp=cam_sinpitch(), tgt=cam_sp0-(t_y-t_y0)*0.0012f; if(tgt<0.5f) tgt=0.5f; if(tgt>0.97f) tgt=0.97f;
+    float vy=t_y-t_y0; vy= vy>40.f ? vy-40.f : vy<-40.f ? vy+40.f : 0.f;   // 40 px before the tilt starts (a sideways drag doesn't tilt)
+    float sp=cam_sinpitch(), tgt=cam_sp0-vy*0.0012f; if(tgt<0.5f) tgt=0.5f; if(tgt>0.97f) tgt=0.97f;
     float e=sp-tgt, a= e<0.f ? -e : e;
     if(sp<-1.5f || cam_sp0<-1.5f || a<0.004f || g_rs_x) g_rs_y=0;
     else { float o=9000.f+23000.f*(a/0.03f); if(o>32767.f) o=32767.f; g_rs_y=(s32)(e>0.f ? o : -o); }
@@ -1395,6 +1396,9 @@ static void touch_update(TouchScreenState1*ts){
     if(!t_down){ g_touch_mode=1; t_down=1; t_settle=2; t_p0=g_poll; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; t_t0=now; t_long=0; t_swiped=0;
       t_cam=cam_screen(); if(t_cam==4){ cam_sp0=cam_sinpitch(); cam_steps=0; cam_push=0; cam_cool=0; } dc_x=dc_y=-1; cam_freeze(0); cam_lx=x; cam_ly=y; cam_vx=cam_vy=0.f; cam_dist=0.f; return; }
     if(t_settle>0){ t_settle--; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; cam_lx=x; cam_ly=y; return; }
+    // A finger / mouse dragged off the screen is still held but reported at (0, 0): keep the last real position (it read as a long
+    // drag back up and left: the battle camera turned the other way and tilted)
+    if(x==0.f && y==0.f){ x=t_x; y=t_y; }
     t_x=x; t_y=y;
     if(t_cam) return;                     // camera drag: no d-pad swipes
     float dx=x-t_sx, dy=y-t_sy;
