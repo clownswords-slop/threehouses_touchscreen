@@ -169,6 +169,10 @@ static int target_game(u64 b,u64 unit,int set){
   if(ss!=11 && ss!=5) return -1;
   if(k==2||k==8||k==23||k<0||k>0x1d) return -1;
   return (((TgtFn)(g_main+0x181c90))(ctl,unit,(ss==5&&k==0xf)?0u:1u,0,(u32)set,-1,-1)&0xff)!=0; }
+static int any_target_flag(u64 b){   // some tile of the map is highlighted as a target (cell byte +0x26 bit 0x20)
+  int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24); if(maxx>32) maxx=32; if(maxy>32) maxy=32;
+  for(int y=miny<0?0:miny;y<maxy;y++) for(int x=minx<0?0:minx;x<maxx;x++){ u64 c=cell_at(x,y); if(c && (*(volatile u8*)(c+0x26)&0x20)) return 1; }
+  return 0; }
 static int target_select(int x,int y){
   u64 b=battle(); u64 c=cell_at(x,y); if(!b||!c) return 0;
   u64 unit=RD64(c); g_tgt_known=0; if(!unit) return 0;
@@ -556,7 +560,8 @@ static int status_det_now(void); static int bdet_det_now(void);
 static int rt_det_now(void){ return rt_wait_det==2 ? bdet_det_now() : status_det_now(); }   // 1 status sheet, 2 battle unit details
 static u64 rt_own;   // replay as soon as the hand owner is no longer this one (a popup or the next screen took the hand)
 static int rt_settle, rt_still; static float rt_hx, rt_hy;   // with rt_own: also wait until the hand has stopped moving
-static void retap_later(float x,float y,int polls){ if(rt_depth>=2) return; rt_x=x; rt_y=y; rt_n=polls; rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_settle=0; rt_still=0; }
+static float rt_hxmin;   // replay as soon as the hand is right of this x (720p): the hand moved into another list of the same screen
+static void retap_later(float x,float y,int polls){ if(rt_depth>=2) return; rt_x=x; rt_y=y; rt_n=polls; rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_settle=0; rt_still=0; rt_hxmin=0.f; }
 static void retap_on_change(float x,float y,int polls){ u64 g=cmn_ui(); retap_later(x,y,polls); if(g) rt_own=RD64(g+0x58); }
 static float learned_pitch(u32 vt); static float learned_xpitch(u32 vt);
 static void rt_tick(void){ if(rt_n<=0) return;
@@ -569,7 +574,10 @@ static void rt_tick(void){ if(rt_n<=0) return;
   if(rt_own){ u64 g=cmn_ui(); if(g && *(volatile u8*)(g+0x50) && RD64(g+0x58)!=rt_own && RD64(g+0x58)){
       if(!rt_settle) rt_n=1;
       else { float hx=RDF(g+0x2c), hy=RDF(g+0x30); if(hx==rt_hx && hy==rt_hy){ if(++rt_still>=2) rt_n=1; } else { rt_still=0; rt_hx=hx; rt_hy=hy; } } } }
-  if(--rt_n==0){ rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_depth++; on_tap(rt_x,rt_y); rt_depth--; } }
+  if(rt_hxmin>0.f){ u64 g=cmn_ui(); int ok=0;   // over there and at rest (rows are placed from the hand's y)
+    if(g && *(volatile u8*)(g+0x50) && RDF(g+0x2c)/1.5f>rt_hxmin){ float hx=RDF(g+0x2c), hy=RDF(g+0x30); if(hx==rt_hx && hy==rt_hy){ if(++rt_still>=1) ok=1; } else { rt_still=0; rt_hx=hx; rt_hy=hy; } }
+    if(ok) rt_n=1; else if(rt_n==1){ rt_n=0; rt_hxmin=0.f; return; } }
+  if(--rt_n==0){ rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_hxmin=0.f; rt_depth++; on_tap(rt_x,rt_y); rt_depth--; } }
 static void probe_later(float x,float y,u32 vt,int xdir){ retap_later(x,y,30); rt_probe_vt=vt; rt_probe_x=xdir; }
 // ---- hand chase: walk the pointing hand to a tapped spot with real d-pad presses ----
 // For screens whose cursor moves between many separate lists (the status sheet in Details mode): the game's own navigation
@@ -888,8 +896,9 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
     list_pick(r,it);   // double tap to assign (the selected row: one tap)
     tm_log2(abil?"avail abilities":"avail arts",it,ridx); return 1; }
   // A tap on the Available list while the left list has the hand: Right moves the hand there (A on a filled slot would open
-  // Unequip / Trade instead), then the tap is replayed on the list
-  if(x>=700.f && rok && rcnt>0){ if(rt_depth==0){ q_push(BTN_R,2,3); retap_later(x,y,6); tm_log2("to available",(s64)x,(s64)y); } return 1; }
+  // Unequip / Trade instead; entering the list always starts on its first row), and the tap is replayed on the list the moment the
+  // hand has moved over (it selects the tapped row with SetIndex + one step).
+  if(x>=700.f && rok && rcnt>0){ if(rt_depth==0){ q_push(BTN_R,2,3); retap_later(x,y,30); rt_hxmin=400.f; tm_log2("to available",(s64)x,(s64)y); } return 1; }
   if(x<hx-25.f || x>hx+360.f) return 1;          // rows span x 171-541 with the hand at 187
   int tab= abil && cnt==9;
   float base= tab? abil_y[idx] : 34.65f*(float)idx;
@@ -931,7 +940,14 @@ static int units_sort_tap(u64 o,float x,float y){
     *(volatile u8*)(o+0x710)=1;
     if(t==p->name){ *(volatile s32*)(o+0x508)=t+1; q_push(BTN_L,2,4); } else { *(volatile s32*)(o+0x508)=t-1; q_push(BTN_R,2,4); }
     press(BTN_A); tm_log2("units sort",t,pg); return 1; }
-  if(hdr && y>170.f && y<=600.f){ if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }   // a row while the hand is on the headers: back down first
+  // a row while the hand is on the headers (e.g. right after sorting): Down from the headers always goes to the first row, so the
+  // header flag is cleared here, the row next to the target set (SetIndex) and one real Down (Up for the first row) lands on it;
+  // armed, so the next tap confirms. Rows 53.6 apart, row 0's middle at y 240.7 (the first visible row, +0x6a); outside the rows:
+  // Down, then the tap again.
+  if(hdr && y>170.f && y<=600.f){ s32 cnt=RDS32(o+0x54), top=(s32)(short)(RD32(o+0x68)>>16); float f=(y-240.7f)/53.6f; int t=top+(int)(f+(f>=0?0.5f:-0.5f));
+    if(cnt>1 && cnt<=60 && t>=0 && t<cnt){ *(volatile u8*)(o+0x710)=0; g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(o, t>0 ? t-1 : 1);
+      press(t>0?BTN_D:BTN_U); dt_arm(o+0x4c,t,0,0); tm_log2("units row from headers",t,top); return 1; }
+    if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }
   return 0; }
 static int hand_list_tap(u64 g,float x,float y){
   if(!hand_on(g)) return 0;
@@ -1284,8 +1300,11 @@ static void on_tap(float x,float y){
         // first tap selects the target instantly (forecast shows); tapping it again confirms
         if(target_select(tx,ty)) return;
         if(g_tgt_known){ tm_log2("target ignored",tx*100+ty,0); return; }   // the game says it is not a target: leave the cursor alone
-        // The game's check can't answer and the tile has no target flag: walk the game's target order one step at a time until
-        // the tapped unit is reached (no d-pad chase: every step jumps to the next target, which hopped between them on its own).
+        // Targets that the game highlights (rally, combat arts ...: some tile has the 0x20 flag) were all checked above, so this
+        // unit is not one: ignore it (the step-through below visibly hopped between the targets and back).
+        if(any_target_flag(b)){ tm_log2("not a flagged target",tx*100+ty,0); return; }
+        // The game's check can't answer and no tile is flagged (ally targets such as heal): walk the game's target order one step at a
+        // time until the tapped unit is reached (no d-pad chase: every step jumps to the next target, which hopped between them).
         tcycle_start(tx,ty); return; } }
     { int cx,cy; cursor_get(&cx,&cy); u64 u=RD64(b+0x3b60);
       if(u && mem_ok(u) && *(volatile u8*)(u+0xf2)==(u8)cx && *(volatile u8*)(u+0xf3)==(u8)cy){ q_push(BTN_A,2,3); } }
@@ -1352,7 +1371,7 @@ static float fsqrt(float d){ if(d<=0.f) return 0.f; float s=d>1.f?d:1.f; for(int
 static float cam_eye_dist(void){ u64 c=cam_obj(); if(!c) return 1e9f; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98); return fsqrt(dx*dx+dy*dy+dz*dz); }
 static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=RDF(c+0x84)-RDF(c+0x94), d=cam_eye_dist(); return d>1.f ? dy/d : -2.f; }
 // Battle camera drag in the two zoom levels with the tile cursor (t_cam 4). The game turns this camera in 30-degree steps, one per
-// right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 192 px (15 % of the width) of horizontal
+// right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 166 px (13 % of the width) of horizontal
 // drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). After a 40 px dead zone the
 // tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.002 per px dragged down; full stick from 0.015 off) with the right stick (the stick
 // has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
@@ -1403,7 +1422,7 @@ static void cam_tick(void){
   if(cam_dist<CAM_TAP*CAM_TAP){ g_rs_x=g_rs_y=0; return; }
   if(t_cam==3){ g_rs_x=g_rs_y=0; drag_cursor_tick(); return; }
   if(t_cam==4){
-    int want=(int)((t_x-t_x0)/-192.f);
+    int want=(int)((t_x-t_x0)/-166.4f);   // 13 % of the 1280 px width per turn step
     if(cam_push>0){ cam_push--; g_rs_x=cam_pdir*32000; if(!cam_push) cam_cool=6; }
     else { g_rs_x=0; if(cam_cool>0) cam_cool--; else if(want!=cam_steps){ cam_pdir= want>cam_steps ? 1 : -1; cam_steps+=cam_pdir; cam_push=7; g_rs_x=cam_pdir*32000; } }
     float vy=t_y-t_y0; vy= vy>40.f ? vy-40.f : vy<-40.f ? vy+40.f : 0.f;   // 40 px before the tilt starts (a sideways drag doesn't tilt)
