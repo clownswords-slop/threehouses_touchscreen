@@ -28,7 +28,19 @@ static int tlog=0;
 #define RD64(a) (*(volatile u64*)(a))
 #define RDF(a) (*(volatile float*)(a))
 
-static int mem_ok(u64 a){ MemInfo mi; u32 pi; if(a<0x1000000) return 0; if(svcQueryMemory(&mi,&pi,a)) return 0; return (mi.perm&1) && mi.type!=0; }
+#ifdef TM_DEBUG
+static u64 g_memq;   // perf: svcQueryMemory calls
+#define MEMQ_COUNT g_memq++;
+#else
+#define MEMQ_COUNT
+#endif
+// The answer for a whole mapped region is kept until the next poll: most checks in a poll hit the same heap region, and each
+// svcQueryMemory is a syscall (several per poll otherwise).
+static int g_mocache=1; static u64 mo_lo, mo_hi, mo_poll=~0ul; static int mo_ok;
+static int mem_ok(u64 a){ MemInfo mi; u32 pi; if(a<0x1000000) return 0;
+  if(g_mocache && mo_poll==g_poll && a>=mo_lo && a<mo_hi) return mo_ok;
+  MEMQ_COUNT if(svcQueryMemory(&mi,&pi,a)) return 0;
+  int ok=(mi.perm&1) && mi.type!=0; mo_lo=mi.addr; mo_hi=mi.addr+mi.size; mo_ok=ok; mo_poll=g_poll; return ok; }
 
 static void find_main(u64 lr){ MemInfo mi; u32 pi; if(svcQueryMemory(&mi,&pi,lr)) return; // text segment region of main
   g_main = mi.addr; }
@@ -775,6 +787,8 @@ static const Seed seeds[]={
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
   {0x1a1d6f8, 0.f, 360.f},          // Tea party: responses to the final comment (1x3 button row, timed, like the topics)
   {0x1a1c878, 53.33f, 0.f},         // Tournament organizer: unit list
+  {0x1a42478, 33.6f, 0.f, 3.f},     // Inventory -> Combat Arts / Abilities / Battalions: Unequip / Trade (also the convoy's Store / Trade)
+  {0x1a42808, 33.6f, 0.f, 3.f},     // ... Equip / Trade on an available one (also the convoy's Take / Trade); the probe step bounced Equip -> Trade -> Equip
   {0x1a48aa8, 34.6f, 0.f, 14.f},    // pause menu -> Storehouse: item list (hand 14 px above a row's middle)
 };
 static const Seed* seed_get(u32 vt){ for(unsigned i=0;i<sizeof(seeds)/sizeof(seeds[0]);i++) if(seeds[i].vt==vt) return &seeds[i]; return 0; }
@@ -873,8 +887,9 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
     if(it<0||it>=rcnt) return 1;
     list_pick(r,it);   // double tap to assign (the selected row: one tap)
     tm_log2(abil?"avail abilities":"avail arts",it,ridx); return 1; }
-  // Taps on the Available list while the left list has the hand are ignored: A on a filled slot opens
-  // Unequip / Trade instead of the list, so pick the slot first (an empty slot moves the hand to the list).
+  // A tap on the Available list while the left list has the hand: Right moves the hand there (A on a filled slot would open
+  // Unequip / Trade instead), then the tap is replayed on the list
+  if(x>=700.f && rok && rcnt>0){ if(rt_depth==0){ q_push(BTN_R,2,3); retap_later(x,y,6); tm_log2("to available",(s64)x,(s64)y); } return 1; }
   if(x<hx-25.f || x>hx+360.f) return 1;          // rows span x 171-541 with the hand at 187
   int tab= abil && cnt==9;
   float base= tab? abil_y[idx] : 34.65f*(float)idx;
@@ -883,7 +898,7 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   if(best<0 || bd>18.f) return 1;                // between sections or outside the list
   list_pick(l,best); tm_log2(abil?"abilities":"arts",best,idx); return 1; }   // double tap (the selected row: one tap)
 // command menus among the generic lists: one tap confirms (everything else is an item / unit list: double tap)
-static int popup_list(u32 vt){ return vt==0x1a25c88 || vt==0x1a483c8; }   // + Storehouse Sell / Cancel   // small confirm popups (shop Buy / Cancel, ...): one tap, no stop on the rows between
+static int popup_list(u32 vt){ return vt==0x1a25c88 || vt==0x1a483c8 || vt==0x1a42478 || vt==0x1a42808; }   // + Unequip / Trade, Equip / Trade   // + Storehouse Sell / Cancel   // small confirm popups (shop Buy / Cancel, ...): one tap, no stop on the rows between
 static int single_tap_list(u32 vt){ return popup_list(vt) || vt==0x1a1db48 || vt==0x1a0eaf0 || vt==0x19ee290 || vt==0x1a3be68 || vt==0x1a083f0 || vt==0x1a20eb0 || vt==0x1a07bd8 || vt==0x19f0e48 || vt==0x19ed970; }   // 0x19f0e48: prep wheel System -> Options / Guide
 // Recent hand owners. Some screens leave G+0x58 empty after a message box closes (shop: "Sent ... to the convoy") until the
 // hand moves; the list under the hand is then the most recent owner that is still a visible list.
@@ -935,6 +950,16 @@ static int hand_list_tap(u64 g,float x,float y){
   if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
+  // Units / Unit Info: the six page dots under the tab strip (x 593 + 18.6 per page, y ~113) jump straight to that page (pages 0 Info,
+  // 1 Stats, 2 Equipment, 3 Combat, 4 Battalions, 5 Skills). The table's page is owner+0x50c; the tab strip keeps its own {previous,
+  // current, next, count 6} at G+0x4eda8 (writing only the page left the labels on the old page): both are set next to the target,
+  // then one real ZR loads it. Only when the strip agrees with the page; otherwise one step towards it.
+  if(vt==0x1a436f8 && y>=100.f && y<=126.f && x>=580.f && x<=705.f){
+    s32 pg=RDS32(o+0x50c); int k=(int)((x-593.f)/18.6f+0.5f); if(k<0) k=0; if(k>5) k=5; volatile s32*st=(volatile s32*)(g+0x4eda8);
+    if(pg<0||pg>5||k==pg) return 1;
+    if(st[1]==pg && st[3]==6){ int p1=(k+5)%6; *(volatile s32*)(o+0x50c)=p1; st[0]=(k+4)%6; st[1]=p1; st[2]=k; q_push(BTN_ZR,2,4); }
+    else q_push(k>pg?BTN_ZR:BTN_ZL,2,4);
+    tm_log2("units page",k,pg); return 1; }
   if(vt==0x1a436f8 && y<115.f){ // Units list header: ZL / ZR page arrows, "R Your Units / Enemy Units"
     u64 bb=battle(); int prep= bb && hud() && RDS32(bb+0x3cc0)==29;   // battle prep Unit Info: R there means Back (the "Deploying" box sits in that spot)
     if(x>=470.f&&x<615.f) q_push(1ul<<8,2,4); else if(x>=665.f&&x<=810.f) q_push(1ul<<9,2,4); else if(!prep && x>=940.f&&x<=1180.f) q_push(1ul<<7,2,4);
@@ -1329,7 +1354,7 @@ static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=R
 // Battle camera drag in the two zoom levels with the tile cursor (t_cam 4). The game turns this camera in 30-degree steps, one per
 // right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 192 px (15 % of the width) of horizontal
 // drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). After a 40 px dead zone the
-// tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.0012 per px dragged down) with the right stick (the stick
+// tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.002 per px dragged down; full stick from 0.015 off) with the right stick (the stick
 // has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
 static float cam_sp0; static int cam_steps, cam_push, cam_pdir, cam_cool;
 static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
@@ -1337,14 +1362,18 @@ static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   // Certifications / Reclass class list (vt 0x1a1ee00) with the unit's model in the middle ("R Rotate"): a drag that starts on the
   // model turns it like Unit Appearance (the list on the left keeps its taps; a touch that doesn't move is still a tap)
   { u64 o; if(hand_on(g) && hand_owner_vt(g,&o)==0x1a1ee00 && widget_vis(o) && t_x>=330.f && t_x<=900.f && t_y>=90.f && t_y<=650.f) return 2; }
+  // battle action menu / weapon picker (phase 2, the hand on a battle HUD list): a drag moves the camera (it stepped the menu)
+  { u64 b=battle(), h=hud(); if(b && h && hand_on(g) && RDS32(b+0x3cc0)==2 && cam_obj() && RDS32(b+0x3b20)>0 && !widget_vis(g+0xe00)){
+      u64 o=RD64(g+0x58); if(o>=h && o<h+0x30000) return cam_eye_dist()<3000.f ? 6 : 4; } }
   if(hand_on(g)) return 0;
   if(tea_extra(g)) return 2;                        // tea party Observe ("R Move Camera")
   if(is_widget(g+0x31120,0x1a44f48)) return 1;    // free-roam HUD up: Byleth is under direct control
   { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;
     if(b && h && cam_obj() && ph==15) return 5;                     // View Unit (Details -> +): the camera orbits the class model
-    // battle map (fight 0 / 1, prep map 30), nothing open: a drag moves the camera (over the shoulder freely, in the two zoom levels
+    // battle map (fight 0 / 1, action menu / target selection 2 (a drag there stepped the menu / hopped targets), a unit walking 8,
+    // prep map 30), nothing else open: a drag moves the camera (over the shoulder freely, in the two zoom levels
     // with the tile cursor in 30-degree turns plus a linear tilt; the prep map has the same camera and only those two levels)
-    if(b && h && cam_obj() && RDS32(b+0x3b20)>0 && (ph==0||ph==1||ph==30) && !widget_vis(h+0x1068) && !widget_vis(h+0xab8)
+    if(b && h && cam_obj() && RDS32(b+0x3b20)>0 && (ph==0||ph==1||ph==2||ph==8||ph==30) && (ph==2 || !widget_vis(h+0x1068)) && !widget_vis(h+0xab8)
        && !widget_vis(g+0xe00) && !*(volatile u8*)(g+0x302e1) && RDS32(g+0x60ab8)==0 && !is_widget(g+0xf1eb4,0x1a2e688)){
       return cam_eye_dist()<3000.f ? 6 : 4; } }
   return 0; }
@@ -1378,10 +1407,10 @@ static void cam_tick(void){
     if(cam_push>0){ cam_push--; g_rs_x=cam_pdir*32000; if(!cam_push) cam_cool=6; }
     else { g_rs_x=0; if(cam_cool>0) cam_cool--; else if(want!=cam_steps){ cam_pdir= want>cam_steps ? 1 : -1; cam_steps+=cam_pdir; cam_push=7; g_rs_x=cam_pdir*32000; } }
     float vy=t_y-t_y0; vy= vy>40.f ? vy-40.f : vy<-40.f ? vy+40.f : 0.f;   // 40 px before the tilt starts (a sideways drag doesn't tilt)
-    float sp=cam_sinpitch(), tgt=cam_sp0-vy*0.0012f; if(tgt<0.5f) tgt=0.5f; if(tgt>0.97f) tgt=0.97f;
+    float sp=cam_sinpitch(), tgt=cam_sp0-vy*0.002f; if(tgt<0.5f) tgt=0.5f; if(tgt>0.97f) tgt=0.97f;
     float e=sp-tgt, a= e<0.f ? -e : e;
     if(sp<-1.5f || cam_sp0<-1.5f || a<0.004f || g_rs_x) g_rs_y=0;
-    else { float o=9000.f+23000.f*(a/0.03f); if(o>32767.f) o=32767.f; g_rs_y=(s32)(e>0.f ? o : -o); }
+    else { float o=9000.f+23000.f*(a/0.015f); if(o>32767.f) o=32767.f; g_rs_y=(s32)(e>0.f ? o : -o); }
     return; }
   if(t_cam==5){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }     // View Unit: like the model turntable, both axes
   if(t_cam==6){ g_rs_x=cam_axis(-cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }    // over the shoulder: free turn and tilt

@@ -37,6 +37,7 @@ static float atan2_approx(float y,float x){ // good to ~0.005 rad
   if(ay>ax) r=1.57079637f-r; if(x<0) r=3.14159274f-r; if(y<0) r=-r; return r; }
 static void cam_angles(float*yaw,float*pit){ u64 c=RD64(g_main+0x1ab8480); *yaw=0; *pit=0; if(!c||!mem_ok(c)) return; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98);
   *yaw=atan2_approx(dz,dx); float h=dx*dx+dz*dz; float hs=h; for(int i=0;i<20;i++){ if(hs<=0) break; hs=0.5f*(hs+h/hs); } *pit=atan2_approx(dy,hs); }
+static u64 pf_n, pf_sum, pf_max, pf_hist[6], pf_dbg, pf_sec[16], pf_memq, pf_cur[16], pf_maxsec[16];   // perf: polls, ticks (19.2 MHz) in process() without the debug channel, max, histogram (<5/10/20/50/100/more us)
 // extra debug commands that need the touch logic
 static void dbg_ext(const char*p){
   if(starts(p,"pick")){ p+=4; float x=(float)(s64)parse_num(&p), y=(float)(s64)parse_num(&p); int i=-1,j=-1,oi_=-1,oj=-1; float fx=0,fz=0;
@@ -68,6 +69,12 @@ static void dbg_ext(const char*p){
   else if(starts(p,"rs")){ p+=2; dbg_rs_x=(s32)(s64)parse_num(&p); dbg_rs_y=(s32)(s64)parse_num(&p); dbg_rs_n=dbg_rs_tot=(int)parse_num(&p); cam_angles(&dbg_yaw0,&dbg_pit0); dbg_dyaw=dbg_dpit=0; os("rs\n"); }
   else if(starts(p,"ang")){ float a,b; cam_angles(&a,&b); os("yaw "); of(a); os(" pit "); of(b); oc('\n'); }
   else if(starts(p,"ls")){ p+=2; dbg_ls_x=(s32)(s64)parse_num(&p); dbg_ls_y=(s32)(s64)parse_num(&p); dbg_ls_n=(int)parse_num(&p); os("ls\n"); }
+  else if(starts(p,"perfreset")){ pf_n=pf_sum=pf_max=0; for(int i=0;i<6;i++) pf_hist[i]=0; for(int i=0;i<16;i++){ pf_sec[i]=0; pf_maxsec[i]=0; } g_memq=0; os("perf reset"); oc(10); }
+  else if(starts(p,"perfsec")){ os("ns/poll by section:"); for(int i=0;i<15;i++){ oc(32); oi(pf_n ? (s64)(pf_sec[i]*10000/192/pf_n) : 0); } os(" | memq/poll x100 "); oi(pf_n ? (s64)(g_memq*100/pf_n) : 0); os(" | worst poll us by section:"); for(int i=0;i<15;i++){ oc(32); oi((s64)(pf_maxsec[i]*10/192)); } oc(10); }
+  else if(starts(p,"mocache")){ p+=7; g_mocache=(int)parse_num(&p); os("mocache "); oi(g_mocache); oc(10); }
+  else if(starts(p,"tlog")){ p+=4; tlog=(int)parse_num(&p); os("tlog "); oi(tlog); oc(10); }
+  else if(starts(p,"perf")){ os("polls "); oi((s64)pf_n); os(" avg_ns "); oi(pf_n ? (s64)(pf_sum*10000/192/pf_n) : 0); os(" max_us "); oi((s64)(pf_max*10/192));
+    os(" hist_us<5,<10,<20,<50,<100,more "); for(int i=0;i<6;i++){ oi((s64)pf_hist[i]); oc(32); } oc(10); }
   else if(starts(p,"polls")){ os("poll "); oi((s64)g_poll); os(" t "); oi((s64)(ticks()/19200)); oc('\n'); }
   else if(starts(p,"jmode")){ p+=5; g_jump_dir=(int)parse_num(&p); os("ok\n"); }
   else if(starts(p,"call")){ p+=4; u64 f=parse_num(&p); u64 a0=parse_num(&p),a1=parse_num(&p),a2=parse_num(&p),a3=parse_num(&p); if(f<0x10000000) f+=g_main;
@@ -105,7 +112,22 @@ static void dbg_ext(const char*p){
 static int inited; static u64 calls;
 static TouchScreenState1 ts; static TouchScreenState1 tsh[16]; static s64 last_samp=-1; static u64 cur_inject;
 
+#ifdef TM_DEBUG
+#define PF(i,x) { u64 a_=ticks(); x; u64 d_=ticks()-a_; pf_sec[i]+=d_; pf_cur[i]+=d_; }
+#else
+#define PF(i,x) { x; }
+#endif
+static void process_(NpadState*s,u32 id,u64 lr);
 static void process(NpadState*s,u32 id,u64 lr){
+#ifdef TM_DEBUG
+  for(int i=0;i<16;i++) pf_cur[i]=0;
+  u64 t0=ticks(); pf_dbg=0; process_(s,id,lr); u64 dt=ticks()-t0-pf_dbg; pf_n++; pf_sum+=dt; if(dt>pf_max){ pf_max=dt; for(int i=0;i<16;i++) pf_maxsec[i]=pf_cur[i]; }
+  { u64 us=dt*10/192; int k= us<5?0: us<10?1: us<20?2: us<50?3: us<100?4: 5; pf_hist[k]++; }
+#else
+  process_(s,id,lr);
+#endif
+}
+static void process_(NpadState*s,u32 id,u64 lr){
   if(!InitTouch||!GetTouch1) return;
   if(!inited){ inited=1; InitTouch(); find_main(lr); Buf b={0}; bstr(&b,"[touchmod] init main="); bhex(&b,g_main); bflush(&b); }
   calls++;
@@ -113,29 +135,29 @@ static void process(NpadState*s,u32 id,u64 lr){
   if(id==g_primary_id){
     g_poll++;
 #ifdef TM_DEBUG
-    if((g_poll%10)==0) poll_cmd();
+    if((g_poll%10)==0){ u64 c0=ticks(); poll_cmd(); pf_dbg+=ticks()-c0; }
     if(dbg_tgt){ dbg_tgt=0; int r=target_select(dbg_tgt_x,dbg_tgt_y); Buf bb={0}; bstr(&bb,"[touchmod] tgt r="); bint(&bb,r); bflush(&bb); }
     if(dbg_tt){ dbg_tt=0; g_force_tile=1; g_ftx=dbg_tt_x; g_fty=dbg_tt_y; on_tap(600.f,300.f); g_force_tile=0; }
     if(dbg_tap){ dbg_tap=0; on_tap((float)dbg_tap_x,(float)dbg_tap_y); }
     if(inj_frames>0){ inj_frames--; cur_inject_dbg=inj_buttons; } else cur_inject_dbg=0;
     if(mash_n>0){ mash_n--; if((mash_i++%mash_period)<2) cur_inject_dbg|=mash_mask; }
 #endif
-    if(GetTouchN){ int n=GetTouchN(tsh,16); if(n>16) n=16;
-      for(int i=n-1;i>=0;i--){ if(tsh[i].sampling>last_samp){ last_samp=tsh[i].sampling; touch_update(&tsh[i]); } } }
-    else { GetTouch1(&ts); touch_update(&ts); }
-    chase_tick(); tcycle_tick();
-    rt_tick();
-    hc_tick();
-    prep_tick();
-    cursor_hide_tick();
-    learn_tick();
-    own_track();
-    if(log_arm){ u64 g=cmn_ui(); if(!g || !*(volatile u8*)(g+0x50) || RD64(g+0x58)!=log_own) log_arm=0; }   // the Log closed: drop the armed entry
-    wa_tick();
-    dt_tick();
-    cv_tick();
-    cur_inject=q_tick()|hold_tick();
-    cam_tick();
+    PF(0, if(GetTouchN){ int n=GetTouchN(tsh,16); if(n>16) n=16;
+      for(int i=n-1;i>=0;i--){ if(tsh[i].sampling>last_samp){ last_samp=tsh[i].sampling; PF(1, touch_update(&tsh[i])); } } }
+    else { GetTouch1(&ts); PF(1, touch_update(&ts)); })
+    PF(2, chase_tick(); tcycle_tick());
+    PF(3, rt_tick());
+    PF(4, hc_tick());
+    PF(5, prep_tick());
+    PF(6, cursor_hide_tick());
+    PF(7, learn_tick());
+    PF(8, own_track());
+    PF(9, if(log_arm){ u64 g=cmn_ui(); if(!g || !*(volatile u8*)(g+0x50) || RD64(g+0x58)!=log_own) log_arm=0; })   // the Log closed: drop the armed entry
+    PF(10, wa_tick());
+    PF(11, dt_tick());
+    PF(12, cv_tick());
+    PF(13, cur_inject=q_tick()|hold_tick());
+    PF(14, cam_tick());
   }
   if(g_rs_x||g_rs_y){ s->r.x=g_rs_x; s->r.y=g_rs_y; }
 #ifdef TM_DEBUG
