@@ -964,6 +964,21 @@ static int hand_list_tap(u64 g,float x,float y){
   if(vt==0x1a1ee00 && y>=150.f && y<=192.f){ if(x>=840.f&&x<=925.f){ press(BTN_ZL); return 1; } if(x>=1140.f&&x<=1230.f){ press(BTN_ZR); return 1; } }
   // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
   if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
+  // Inventory -> Items -> Trade (two units' items side by side): the hand owner (vt 0x1a39fc8) holds the left list at +0xa0 (vt 0x1a49c40)
+  // and the right one at +0xde0 (vt 0x19f99e8), the active side at +0x50 (0 left, 1 right); the generic list skipped the container.
+  // Rows don't scroll (6 slots): hand y 304 + 34.67 per row, rows x 176-545 / 726-1092. A on an item picks it and moves the hand to the
+  // other side; A there swaps. A tap on the active side selects the row (the selected one: A at once, the next tap on it: A); on the
+  // other side the active list's index is set to the row first, then Left / Right, which carries the row across.
+  if(vt==0x1a39fc8 && widget_vis(o)){
+    if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // X Details
+    int side= x>=176.f&&x<=545.f ? 0 : x>=726.f&&x<=1092.f ? 1 : -1; if(side<0) return 1;
+    float f=(y-304.f)/34.67f; int r=(int)(f+(f>=0?0.5f:-0.5f)); if(r<0||r>5||y<283.f) return 1;
+    s32 act=RDS32(o+0x50); if(act<0||act>1) return 1;
+    u64 al= act ? o+0xde0 : o+0xa0, tl= side ? o+0xde0 : o+0xa0;
+    s32 tcnt=RDS32(tl+0x54); if(r>=tcnt) return 1;
+    if(side==act){ list_pick(tl,r); tm_log2("trade row",side*10+r,act); return 1; }
+    s32 acnt=RDS32(al+0x54); if(r<acnt && r!=RDS32(al+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(al,r); }
+    q_push(side?BTN_R:BTN_L,2,3); dt_arm(tl+0x4c,r,0,0); tm_log2("trade side",side*10+r,act); return 1; }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
   // Units / Unit Info: the six page dots under the tab strip (x 593 + 18.6 per page, y ~113) jump straight to that page (pages 0 Info,
@@ -1371,7 +1386,7 @@ static float fsqrt(float d){ if(d<=0.f) return 0.f; float s=d>1.f?d:1.f; for(int
 static float cam_eye_dist(void){ u64 c=cam_obj(); if(!c) return 1e9f; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98); return fsqrt(dx*dx+dy*dy+dz*dz); }
 static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=RDF(c+0x84)-RDF(c+0x94), d=cam_eye_dist(); return d>1.f ? dy/d : -2.f; }
 // Battle camera drag in the two zoom levels with the tile cursor (t_cam 4). The game turns this camera in 30-degree steps, one per
-// right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 166 px (13 % of the width) of horizontal
+// right-stick push (holding it longer still turns one step), and tilts it smoothly. Every 128 px (10 % of the width) of horizontal
 // drag = one push (8 polls, then 6 released); the world follows the finger (drag right = stick left). After a 40 px dead zone the
 // tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.002 per px dragged down; full stick from 0.015 off) with the right stick (the stick
 // has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
@@ -1422,7 +1437,7 @@ static void cam_tick(void){
   if(cam_dist<CAM_TAP*CAM_TAP){ g_rs_x=g_rs_y=0; return; }
   if(t_cam==3){ g_rs_x=g_rs_y=0; drag_cursor_tick(); return; }
   if(t_cam==4){
-    int want=(int)((t_x-t_x0)/-166.4f);   // 13 % of the 1280 px width per turn step
+    int want=(int)((t_x-t_x0)/-128.f);   // 10 % of the 1280 px width per turn step
     if(cam_push>0){ cam_push--; g_rs_x=cam_pdir*32000; if(!cam_push) cam_cool=6; }
     else { g_rs_x=0; if(cam_cool>0) cam_cool--; else if(want!=cam_steps){ cam_pdir= want>cam_steps ? 1 : -1; cam_steps+=cam_pdir; cam_push=7; g_rs_x=cam_pdir*32000; } }
     float vy=t_y-t_y0; vy= vy>40.f ? vy-40.f : vy<-40.f ? vy+40.f : 0.f;   // 40 px before the tilt starts (a sideways drag doesn't tilt)
