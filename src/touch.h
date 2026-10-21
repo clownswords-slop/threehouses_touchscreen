@@ -512,7 +512,9 @@ static int title_flow_tap(u64 g,float x,float y){
       return 1; }
     if(x<100.f||x>1150.f||y>655.f) return 0;
     float hy=RDF(g+0x30)/1.5f-5.f; float f=(y-hy)/140.f; int d=(int)(f+(f>=0?0.5f:-0.5f));
-    if(ovt==0x1a3aee0){ s32 idx=RDS32(own+0x4c), cnt=RDS32(own+0x54); if(idx+d<0||idx+d>=cnt) return 1; list_jump(own,idx+d,1); }
+    // loading: one tap; saving: the slot that is selected (the one the list opens on, or one tapped before) saves at once, any other
+    // slot is selected first (a stray tap overwrote a file)
+    if(ovt==0x1a3aee0){ s32 idx=RDS32(own+0x4c), cnt=RDS32(own+0x54); if(idx+d<0||idx+d>=cnt) return 1; if(load_list) list_jump(own,idx+d,1); else list_pick(own,idx+d); }
     else { u64 b=d>0?BTN_D:BTN_U; int n=d<0?-d:d; for(int i=0;i<n;i++) q_push(b,1,3); q_push(BTN_A,2,3); }
     tm_log2("save slot",d,(s64)hy); return 1; }
   return 0;
@@ -795,6 +797,8 @@ static const Seed seeds[]={
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
   {0x1a1d6f8, 0.f, 360.f},          // Tea party: responses to the final comment (1x3 button row, timed, like the topics)
   {0x1a1c878, 53.33f, 0.f},         // Tournament organizer: unit list
+  {0x1a462e8, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge List / Repair List (hand 11.5 px above a row's middle)
+  {0x1a46658, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge Selection
   {0x1a42478, 33.6f, 0.f, 3.f},     // Inventory -> Combat Arts / Abilities / Battalions: Unequip / Trade (also the convoy's Store / Trade)
   {0x1a42808, 33.6f, 0.f, 3.f},     // ... Equip / Trade on an available one (also the convoy's Take / Trade); the probe step bounced Equip -> Trade -> Equip
   {0x1a48aa8, 34.6f, 0.f, 14.f},    // pause menu -> Storehouse: item list (hand 14 px above a row's middle)
@@ -882,6 +886,7 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   int batt= vt==0x1a40630;   // Battalions: same layout, the right list is the Barracks (vt 0x1a41770, wider rows), L/R unit arrows, X Sort
   if(batt){ if(y>=88.f&&y<=128.f){ if(x>=35.f&&x<=120.f){ press(BTN_LB); return 1; } if(x>=380.f&&x<=470.f){ press(BTN_RB); return 1; } }
     if(inbox(x,y,960.f,1250.f,42.f,82.f)){ press(BTN_X); return 1; } }
+  if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("abilities details",0,0); return 1; }   // "X Details" in the corner
   u64 l=o+0x758, r=o+0xdb0; if(!is_widget(l,0x1a42108)) return 1;
   int abil= vt==0x1a40300;
   s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;

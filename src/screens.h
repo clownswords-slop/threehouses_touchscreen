@@ -313,7 +313,7 @@ static int header_tap(u64 g,float x,float y){
   if(vt==0x1a44a48 && inbox(x,y,1145.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // Battlefield (mission list + map, from the calendar): X Menu
   if(vt==0x1a1e048 && y>=682.f&&y<=718.f){ if(x>=790.f&&x<955.f){ press(BTN_PLUS); return 1; } if(x>=995.f&&x<1110.f){ press(BTN_X); return 1; } if(x>=1145.f&&x<=1264.f){ press(BTN_ZR); return 1; } }   // Instruct: + Auto-Instruct / X Status / ZR Classes
   if(vt==0x1a1ddc8 && y>=682.f&&y<=718.f){ if(x>=995.f&&x<1110.f){ press(BTN_X); return 1; } if(x>=1145.f&&x<=1264.f){ press(BTN_ZR); return 1; } }   // Instruct topics: X Status / ZR Classes
-  if(vt==0x1a47f78 && y>=88.f&&y<=128.f){ if(x>=830.f&&x<=905.f){ press(BTN_LB); return 1; } if(x>=1165.f&&x<=1245.f){ press(BTN_RB); return 1; } }   // shops: L / R unit arrows
+  if((vt==0x1a47f78||vt==0x1a462e8) && y>=88.f&&y<=128.f){ if(x>=830.f&&x<=905.f){ press(BTN_LB); return 1; } if(x>=1165.f&&x<=1245.f){ press(BTN_RB); return 1; } }   // shops, blacksmith Forge / Repair List: L / R unit arrows
   if(vt==0x1a44138 && y>=88.f&&y<=128.f){ if(x>=35.f&&x<=115.f) press(BTN_ZL); else if(x>=725.f&&x<=805.f) press(BTN_ZR); return 1; }
   if(vt==0x1a43a68 && y>=88.f&&y<=128.f){ if(x>=820.f&&x<=910.f) press(BTN_LB); else if(x>=1170.f&&x<=1260.f) press(BTN_RB); return 1; }
   if((vt==0x1a24f40||vt==0x1a250f8) && y>=110.f&&y<=152.f){                     // Goals (unit chosen): L / R unit arrows
@@ -469,12 +469,16 @@ static int dlc_tap(u64 g,float x,float y){
   s32 idx=RDS32(cl+0x4c), cnt=RDS32(cl+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
   float hy=RDF(g+0x30)/1.5f, f=(y-(hy+3.f))/35.f; int d=(int)(f+(f>=0?0.5f:-0.5f)); if(idx+d<0||idx+d>=cnt) return 1;
   if(d) list_jump(cl,idx+d,0); tm_log2("dlc contents",idx+d,idx); return 1; }
-// ---- Storehouse "Sell how many?" dialog: quantity picker on top (no hand), Sell / Cancel buttons below = a 1x2 grid at G+0x8d8b0
+// ---- Storehouse / shop "Sell how many?" dialog: quantity picker on top (no hand), Sell / Cancel buttons below = a 1x2 grid at G+0x8d8b0
 // (vt 0x1a241a8, column +0x50, focused when +8 has 0x0c). Buttons: Sell x 385-635, Cancel 645-890, y 425-470; the quantity arrows at
 // x ~728 / ~857, y ~302. ----
 static int sell_dialog_tap(u64 g,float x,float y){
-  u64 w=g+0x8d8b0; if(!is_widget(w,0x1a241a8) || RDS32(w+0x58)!=2 || !is_widget(g+0x8eb38,0x1a48aa8)) return 0;   // only over the storehouse list
+  // the same dialog in the shops (Sell -> an item stack from the convoy): G+0x8b0f8 over the shop list G+0x85418
+  u64 w=g+0x8d8b0;
+  if(!(is_widget(w,0x1a241a8) && RDS32(w+0x58)==2 && is_widget(g+0x8eb38,0x1a48aa8))){   // over the storehouse list
+    w=g+0x8b0f8; if(!(is_widget(w,0x1a241a8) && RDS32(w+0x58)==2 && is_widget(g+0x85418,0x1a47f78))) return 0; }
   int foc=(*(volatile u8*)(w+8)&0x0c)==0x0c && hand_on(g) && RD64(g+G_HAND_OWNER)==w;
+  if(inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_A); return 1; }   // "A Confirm" in the corner
   if(y>=420.f&&y<=475.f&&x>=385.f&&x<=890.f){ int c= x<640.f ? 0 : 1;
     s32 cur=RDS32(w+0x50);
     if(!foc){ if(rt_depth==0){ q_push(BTN_D,2,1); retap_on_change(x,y,20); tm_log2("sell dialog down",c,cur); } return 1; }   // focus on the quantity: down, then the tap again the moment the buttons take the hand
