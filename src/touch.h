@@ -512,9 +512,9 @@ static int title_flow_tap(u64 g,float x,float y){
       return 1; }
     if(x<100.f||x>1150.f||y>655.f) return 0;
     float hy=RDF(g+0x30)/1.5f-5.f; float f=(y-hy)/140.f; int d=(int)(f+(f>=0?0.5f:-0.5f));
-    // loading: one tap; saving: the slot that is selected (the one the list opens on, or one tapped before) saves at once, any other
-    // slot is selected first (a stray tap overwrote a file)
-    if(ovt==0x1a3aee0){ s32 idx=RDS32(own+0x4c), cnt=RDS32(own+0x54); if(idx+d<0||idx+d>=cnt) return 1; if(load_list) list_jump(own,idx+d,1); else list_pick(own,idx+d); }
+    // saving and loading: the slot that is selected (the one the list opens on, or one tapped before) saves / loads at once, any
+    // other slot is selected first (a stray tap overwrote or loaded a file)
+    if(ovt==0x1a3aee0){ s32 idx=RDS32(own+0x4c), cnt=RDS32(own+0x54); if(idx+d<0||idx+d>=cnt) return 1; list_pick(own,idx+d); }
     else { u64 b=d>0?BTN_D:BTN_U; int n=d<0?-d:d; for(int i=0;i<n;i++) q_push(b,1,3); q_push(BTN_A,2,3); }
     tm_log2("save slot",d,(s64)hy); return 1; }
   return 0;
