@@ -798,6 +798,8 @@ static const Seed seeds[]={
   {0x1a1d6f8, 0.f, 360.f},          // Tea party: responses to the final comment (1x3 button row, timed, like the topics)
   {0x1a1c878, 53.33f, 0.f},         // Tournament organizer: unit list
   {0x1a462e8, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge List / Repair List (hand 11.5 px above a row's middle)
+  {0x1a1f240, 48.f, 0.f, 19.f},     // Saint Statue Artisan: statue list (hand 19 px above a row's middle)
+  {0x1a1f3f8, 34.67f, 0.f, 0.7f},   // Saint Statue Artisan: restoration rewards of the chosen statue
   {0x1a46658, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge Selection
   {0x1a42478, 33.6f, 0.f, 3.f},     // Inventory -> Combat Arts / Abilities / Battalions: Unequip / Trade (also the convoy's Store / Trade)
   {0x1a42808, 33.6f, 0.f, 3.f},     // ... Equip / Trade on an available one (also the convoy's Take / Trade); the probe step bounced Equip -> Trade -> Equip
@@ -984,6 +986,10 @@ static int hand_list_tap(u64 g,float x,float y){
     if(side==act){ list_pick(tl,r); tm_log2("trade row",side*10+r,act); return 1; }
     s32 acnt=RDS32(al+0x54); if(r<acnt && r!=RDS32(al+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(al,r); }
     q_push(side?BTN_R:BTN_L,2,3); dt_arm(tl+0x4c,r,0,0); tm_log2("trade side",side*10+r,act); return 1; }
+  // Saint Statue Artisan: rewards list (right): "X Details" in the corner; a tap on the statue list (left) goes back there first
+  if(vt==0x1a1f3f8 && widget_vis(o)){
+    if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("statue details",0,0); return 1; }
+    if(x>=70.f && x<=310.f && y>=150.f && y<=355.f){ if(rt_depth==0){ press(BTN_B); retap_on_change(x,y,30); tm_log2("statue list back",(s64)x,(s64)y); } return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
   // Units / Unit Info: the six page dots under the tab strip (x 593 + 18.6 per page, y ~113) jump straight to that page (pages 0 Info,
