@@ -248,9 +248,9 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 // (100_BMAP_cursor_*) and stores the state at battle+0x3d5d. The game calls it on state changes,
 // so while in touch mode we hide it again whenever it comes back, and restore it on real button input.
 typedef void (*CurShowFn)(u64 b,int show);
-static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph;
+static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 // called when a touch confirms the destination of a move (A pressed in phase 1)
-static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; }
+static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
 static void cursor_hide_tick(void){
   u64 b=battle(); if(!b||!g_main) return;
   s32 ph=RDS32(b+0x3cc0);
@@ -258,7 +258,10 @@ static void cursor_hide_tick(void){
   // Hidden only from the tap on a destination tile until the unit has walked there. Phase 1 = unit selected,
   // 8 = unit walking, 2 = action menu (the game hides the cursor itself in 8 and 2).
   if(g_move_hide){
-    if((ph==1||ph==8) && ++g_move_ph<300){ if(*shown){ ((CurShowFn)(g_main+0xa2810))(b,0); g_cur_hidden=1; } return; }
+    // if the game doesn't start the walk soon after the confirm (A refused, e.g. a tile out of reach), the unit is still being
+    // moved: show the cursor again instead of hiding it for the whole timeout
+    if(ph==8) g_move_walk=1;
+    if((ph==8 || (ph==1 && (g_move_walk || g_move_ph<40))) && ++g_move_ph<300){ if(*shown){ ((CurShowFn)(g_main+0xa2810))(b,0); g_cur_hidden=1; } return; }
     g_move_hide=0; }
   if(g_cur_hidden){ g_cur_hidden=0; if(!*shown && (ph==0||ph==1) && RDS32(b+0x3b20)>0 && cam_obj()) ((CurShowFn)(g_main+0xa2810))(b,1); }
 }
@@ -1276,6 +1279,7 @@ static void on_tap(float x,float y){
       else if(phase==1){
         // first tap: only put the cursor on the destination (the game draws the path); a tap on the tile under the cursor confirms
         // the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
+        g_move_hide=0;   // a new destination: the cursor shows again right away (cursor_hide_tick restores it)
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
         dmap_from_cam(); for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
           if(nx==cx&&ny==cy){ q_push(dbtn[k],1,2); done=1; break; }
