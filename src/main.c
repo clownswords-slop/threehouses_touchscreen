@@ -155,7 +155,6 @@ static void process_(NpadState*s,u32 id,u64 lr){
     PF(9, if(log_arm){ u64 g=cmn_ui(); if(!g || !*(volatile u8*)(g+0x50) || RD64(g+0x58)!=log_own) log_arm=0; })   // the Log closed: drop the armed entry
     PF(10, wa_tick());
     PF(11, dt_tick());
-    PF(12, cv_tick());
     PF(13, cur_inject=q_tick()|hold_tick());
     PF(14, cam_tick());
   }

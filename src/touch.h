@@ -624,18 +624,10 @@ static void tm_log2(const char*m,s64 a,s64 b){ if(!tlog) return; Buf bb={0}; bst
 #define CV_CNT  0x111d0  // rows in the current convoy tab
 #define CV_TAB  0x111ec  // current convoy tab (0..6)
 #define CV_FOC  0x111f0  // 1 = convoy list has focus, 0 = unit list
-#define CV_IDX  0x111e8  // selected convoy row (absolute index)
+#define CV_IDX  0x111e8  // selected convoy row within the visible rows (0..10)
+#define CV_TOP  0x111e4  // first visible convoy row of the current tab (+0x111e0 keeps an older value across tab changes)
 static float cv_row_y(u64 g){ // 720p centre of the currently highlighted convoy row, from the hand cursor
   u64 hd=g+CV_HAND; if(RD64(hd)!=g_main+0x19edb28) return -1.f; return RDF(hd+0x30)/1.5f-21.4f; }
-static int cv_top_ok, cv_still; static s32 cv_top, cv_li; static float cv_ly;
-static void cv_tick(void){ u64 g=cmn_ui(); if(!g || !is_widget(g+CV_UL,0x1a4a218) || !RDS32(g+CV_FOC)){ cv_top_ok=0; cv_still=0; return; }
-  float hy=cv_row_y(g); if(hy<0.f){ cv_top_ok=0; return; }
-  s32 ci=RDS32(g+CV_IDX);
-  if(hy!=cv_ly || ci!=cv_li){ cv_ly=hy; cv_li=ci; cv_still=0; return; }   // index change: the hand starts moving a frame later
-  if(++cv_still<10 || q_busy()) return;
-  float fr=(hy-232.f)/35.2f; int r=(int)(fr+0.5f); float e=fr-(float)r; if(e<0) e=-e; if(e>0.12f) return;   // hand exactly on a row
-  s32 cnt=RDS32(g+CV_CNT); int t=ci-r, tmax= cnt>11 ? cnt-11 : 0; if(t<0) t=0; if(t>tmax) t=tmax;           // 11 rows visible
-  cv_top=t; cv_top_ok=1; }
 static int convoy_tap(u64 g,float x,float y){
   u64 ul=g+CV_UL, us=g+CV_US, ts=g+CV_TS;
   if(!is_widget(ul,0x1a4a218)) return 0;
@@ -650,40 +642,40 @@ static int convoy_tap(u64 g,float x,float y){
   // category tabs above the convoy list
   if(x>=795.f&&x<=1022.f&&y>=124.f&&y<=166.f){
     int k=(int)((x-812.f)/31.5f+0.5f); if(k<0)k=0; if(k>6)k=6;
-    if(!foc){ q_push(BTN_R,1,3); retap_later(x,y,6); return 1; }
+    if(!foc){ q_push(BTN_ZR,1,3); retap_later(x,y,6); return 1; }
     if(k==tab) return 1;
     // instant: put the tab next to the target, one real step makes the game load the target tab
     *(volatile s32*)(g+CV_TAB)= k>tab ? k-1 : k+1; q_push(k>tab?BTN_R:BTN_L,2,3);
     tm_log2("tab",k,tab); return 1; }
   // arrows at both ends of the tab strip, unit switch arrows (L name R) above the unit panel, X Details
   if(y>=122.f&&y<=166.f&&((x>=640.f&&x<705.f)||(x>=1125.f&&x<=1190.f))){
-    if(!foc){ q_push(BTN_R,1,3); retap_later(x,y,6); return 1; }
+    if(!foc){ q_push(BTN_ZR,1,3); retap_later(x,y,6); return 1; }
     q_push(x<900.f?BTN_L:BTN_R,2,3); return 1; }
   if(y>=88.f&&y<=128.f&&x>=110.f&&x<=190.f){ q_push(BTN_LB,2,4); return 1; }
   if(y>=88.f&&y<=128.f&&x>=420.f&&x<=500.f){ q_push(BTN_RB,2,4); return 1; }
   if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ q_push(BTN_X,2,4); return 1; }
   // convoy list rows
   if(x>=665.f&&x<=1150.f&&y>=214.f&&y<=650.f){
-    if(!foc){ q_push(BTN_R,1,3); retap_later(x,y,6); return 1; }
-    s32 cnt=RDS32(g+CV_CNT); float cy=cv_row_y(g); if(cnt<=0||cy<0.f) return 1;
-    int rt=(int)((y-214.4f)/35.2f), rc=(int)((cy-214.4f)/35.2f+0.5f); // visible row index (row 0 centre = 232)
-    // the hand glides to a new row for a few frames while the index has already changed: use the scroll position seen
-    // the last time the hand was at rest (cv_tick), so quick taps don't land a row or two off
-    if(cv_top_ok) rc=RDS32(g+CV_IDX)-cv_top;
-    else if(cnt<=11) rc=RDS32(g+CV_IDX);   // short list: never scrolled
-    if(cnt<=11 && rt>=cnt) return 1;   // short list: ignore taps below the last row
-    // instant: the selected row index is G+0x111e8 (the row record G+0x111c0 is looked up from it on each step), so put
-    // the index next to the target and take one real step
-    int d=rt-rc; s32 ci=RDS32(g+CV_IDX); int t=ci+d; if(t<0||t>=cnt) return 1;
-    int conf=dt_same(g+CV_IDX,t,0,0) || (!d && !q_busy());   // the selected row confirms at once
+    if(!foc){ q_push(BTN_ZR,1,3); retap_later(x,y,6); return 1; }
+    // G+0x111e8 is the selected row within the 11 visible ones (not the absolute index), G+0x111e4 the first visible row.
+    // Instant: put the row next to the target and take one real step (the row record G+0x111c0 is looked up on each step).
+    s32 cnt=RDS32(g+CV_CNT), top=RDS32(g+CV_TOP), ci=RDS32(g+CV_IDX); if(cnt<=0||top<0||ci<0||ci>10) return 1;
+    int t=(int)((y-214.4f)/35.2f), d=t-ci;   // visible row index (row 0 centre = 232)
+    if(t<0||t>10||top+t>=cnt) return 1;      // below the last row
+    // the selected row confirms at once, except on the replay after the focus came over from the unit list (the convoy shows no
+    // selection while it hasn't the focus, so the remembered row would confirm out of the blue)
+    int conf=dt_same(g+CV_IDX,t,g+CV_TOP,top) || (!d && !q_busy() && rt_depth==0);
     if(d){ int pre= d>0 ? t-1 : t+1; if(pre!=ci) *(volatile s32*)(g+CV_IDX)=pre; g_learn_hold=20; q_push(d>0?BTN_D:BTN_U,2,3); }
-    if(conf){ dt_on=0; q_push(BTN_A,2,3); } else dt_arm(g+CV_IDX,t,0,0);   // double tap to confirm
-    tm_log2("convoy row",rt,rc); return 1; }
+    if(conf){ dt_on=0; q_push(BTN_A,2,3); } else dt_arm(g+CV_IDX,t,g+CV_TOP,top);   // double tap to confirm
+    tm_log2("convoy row",top+t,top+ci); return 1; }
   // unit item list
   if(x>=110.f&&x<=490.f&&y>=268.f&&y<=500.f){
-    // back to the unit list: Left on the first tab moves the focus there (on other tabs Left changes tab). Instant: the tab next to
-    // the first one, one real step loads the first tab, one more moves the focus (walking every tab flipped through all of them)
-    if(foc){ if(tab>1) *(volatile s32*)(g+CV_TAB)=1; if(tab>0) q_push(BTN_L,2,3); q_push(BTN_L,1,3); retap_later(x,y,6); return 1; }
+    // back to the unit list: ZL moves the focus there and keeps the convoy's tab (Left on the first tab does too, but walking
+    // back to it flipped the convoy to the first tab)
+    if(foc){ q_push(BTN_ZL,2,3); retap_later(x,y,6); return 1; }
+    if(rt_depth>0){   // replay after the focus change: select only (no selection was shown on this list), the next tap confirms
+      s32 cnt=RDS32(ul+0x54); int it=(int)((y-286.6f)/35.2f+0.5f+100.f)-100; if(cnt<=0||cnt>40||it<0||it>=cnt) return 1;
+      if(RDS32(ul+0x4c)!=it) list_jump(ul,it,0); dt_arm(ul+0x4c,it,0,0); tm_log2("unit items sel",it,0); return 1; }
     rows_pick(ul,x,y,110.f,490.f,286.6f,35.2f,"unit items"); return 1; }
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
@@ -1282,13 +1274,14 @@ static void on_tap(float x,float y){
         // outside the blue/red range: ignore instead of confirming "stay here"
       }
       else if(phase==1){
-        move_confirmed();
-        // jump next to the target, then take one real d-pad step so the game recomputes the move path
+        // first tap: only put the cursor on the destination (the game draws the path); a tap on the tile under the cursor confirms
+        // the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
         dmap_from_cam(); for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
           if(nx==cx&&ny==cy){ q_push(dbtn[k],1,2); done=1; break; }
           if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,2); done=1; } }
-        if(done) wait_then_a(tx,ty); else chase_start(tx,ty,1);
+        if(!done) chase_start(tx,ty,0);
+        tm_log2("move target",tx*100+ty,0);
       }
       else if(set_cursor_instant(tx,ty)){ if(want_a){ q_push(0,2,0); q_push(BTN_A,2,3); } }
       else chase_start(tx,ty,want_a);

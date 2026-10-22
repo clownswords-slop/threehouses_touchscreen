@@ -373,12 +373,21 @@ static void prep_tick(void){ if(pw_n<=0) return; pw_n--; if(q_busy()) return; u6
   if(RDS32(o+0x88)==2 && RDS32(o+0x8c)==pw_t){ press(BTN_A); pw_n=0; } }
 static const Prompt prep_wheel_prompts[]={ {955.f,1095.f,BTN_X}, {1135.f,1264.f,BTN_A} };
 static const Prompt prep_units_prompts[]={ {765.f,940.f,BTN_ZL}, {985.f,1090.f,BTN_X}, {1135.f,1264.f,BTN_RB} };
+// With adjutants unlocked, a deployed unit other than Byleth also gets "Y Set Adjutant" (Units list and R Unit Info), which shifts the
+// prompts on its left. The prompt bar's
+// entries are u32 codes at G+0xf0 (count G+0x118, right to left: 0x800 R, 0x8000 Y, 0x1000 X, 0x100 ZL)
+static const Prompt prep_units_adj_prompts[]={ {576.f,745.f,BTN_ZL}, {795.f,895.f,BTN_X}, {947.f,1092.f,BTN_Y}, {1133.f,1264.f,BTN_RB} };
+static int prompt_bar_has(u64 g,u32 code){ s32 n=RDS32(g+0x118); if(n<0||n>10) return 0; for(int i=0;i<n;i++) if(RD32(g+0xf0+4*i)==code) return 1; return 0; }
 static const Prompt prep_info_prompts[]={ {1010.f,1120.f,BTN_X}, {1160.f,1264.f,BTN_RB} };
+static const Prompt prep_info_adj_prompts[]={ {824.f,925.f,BTN_X}, {970.f,1118.f,BTN_Y}, {1155.f,1264.f,BTN_RB} };
 static int prep_tap(u64 g,float x,float y){
   s32 ph=prep_phase(); if(ph<28||ph>30) return 0;
   if(ph==29){ u64 vt=hand_owner_vt(g,0); if(!hand_on(g)) return 0;
-    if(vt==0x1a44878 && prompt_tap(x,y,prep_units_prompts,NP(prep_units_prompts))) return 1;
-    if(vt==0x1a436f8 && prompt_tap(x,y,prep_info_prompts,NP(prep_info_prompts))) return 1;   // R Unit Info table: X Status / R Back
+    if(vt==0x1a44878){ if(prompt_bar_has(g,0x8000)){ if(prompt_tap(x,y,prep_units_adj_prompts,NP(prep_units_adj_prompts))) return 1; }
+      else if(prompt_tap(x,y,prep_units_prompts,NP(prep_units_prompts))) return 1; }
+    if(vt==0x1a436f8){   // R Unit Info table: X Status / (Y Set Adjutant) / R Back
+      if(prompt_bar_has(g,0x8000)){ if(prompt_tap(x,y,prep_info_adj_prompts,NP(prep_info_adj_prompts))) return 1; }
+      else if(prompt_tap(x,y,prep_info_prompts,NP(prep_info_prompts))) return 1; }
     return 0; }
   if(ph!=28 || hand_on(g)) return 0;
   u64 o=prep_wheel(); if(!o) return 0;
