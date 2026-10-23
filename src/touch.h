@@ -250,6 +250,7 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 typedef void (*CurShowFn)(u64 b,int show);
 static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
+static int g_cam_sens=7; // Options -> TouchMod -> Camera Sensitivity 0..15: free-roam camera drag gain (v+1)/8 (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
 // Drawn cursor pinned on a tile for n polls: SetCursor with snap copies the cell's position (+0x10 x, +0x18 z) into the glide
@@ -693,7 +694,7 @@ static int convoy_tap(u64 g,float x,float y){
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
 // Options screen (map menu -> Options): common UI list at G+0x2250, tabs Battle/Monastery/General (+ TouchMod, opts.h)
-static int opts_tabs4(void); static int opts_our_row(int it); static void opts_tap_value(float x);
+static int opts_tabs4(void); static int opts_our_row(int it); static void opts_tap_value(int it,float x);
 #define OP_LIST 0x2250   // vtable main+0x1a431f8; +0x4c idx, +0x54 cnt, u16 at +0x6a = first visible row
 #define OP_TAB  0x2bd0   // 0 Battle, 1 Monastery, 2 General (ZL/ZR)
 static int options_tap(u64 g,float x,float y){
@@ -712,7 +713,7 @@ static int options_tap(u64 g,float x,float y){
   if(x>=300.f&&x<=975.f&&y>=185.f&&y<=556.f){
     int top=(int)((RD32(w+0x68)>>16)&0xffff); if(top<0||top>=cnt) top=0;
     int r=(int)((y-185.1f)/34.8f); int it=top+r; if(it<0||it>=cnt) return 1;
-    if(opts_our_row(it)){ opts_tap_value(x); tm_log2("options touchmod row",(s64)x,0); return 1; }   // TouchMod tab: the mod's own option
+    if(opts_our_row(it)){ if(RDS32(w+0x4c)!=it) list_jump(w,it,0); else opts_tap_value(it,x); tm_log2("options touchmod row",(s64)x,it); return 1; }   // TouchMod tab: the mod's own options (a tap on the other row selects it first)
     list_jump(w,it,0);
     if(x>=655.f&&x<=735.f) q_push(BTN_L,2,3);        // left arrow
     else if(x>=770.f) q_push(BTN_R,2,3);              // value or right arrow
@@ -1484,8 +1485,10 @@ static void cam_tick(void){
   if(t_cam==5){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }     // View Unit: like the model turntable, both axes
   if(t_cam==6){ g_rs_x=cam_axis(-cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }    // over the shoulder: free turn and tilt
   if(t_cam==2){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=0; }          // model turntable: horizontal only
-  else { // free roam: horizontal 18x the finger speed (2x the old 9x), vertical 0.75x of the old response (gain and top deflection)
-    g_rs_x=cam_axis(-cam_vx*18.f,2000.f); g_rs_y=(s32)((float)cam_axis(cam_vy*9.f,1400.f)*0.75f); }
+  else { // free roam: horizontal 18x the finger speed (2x the old 9x), vertical 0.75x of the old response (gain and top deflection),
+    // both times Options -> TouchMod -> Camera Sensitivity ((v+1)/8, 1 by default)
+    float k=(float)(g_cam_sens+1)/8.f;
+    g_rs_x=cam_axis(-cam_vx*18.f*k,2000.f); g_rs_y=(s32)((float)cam_axis(cam_vy*9.f*k,1400.f)*0.75f); }
 }
 static void touch_update(TouchScreenState1*ts){
   u64 now=ticks();
