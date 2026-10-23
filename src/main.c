@@ -38,6 +38,12 @@ static float atan2_approx(float y,float x){ // good to ~0.005 rad
 static void cam_angles(float*yaw,float*pit){ u64 c=RD64(g_main+0x1ab8480); *yaw=0; *pit=0; if(!c||!mem_ok(c)) return; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98);
   *yaw=atan2_approx(dz,dx); float h=dx*dx+dz*dz; float hs=h; for(int i=0;i<20;i++){ if(hs<=0) break; hs=0.5f*(hs+h/hs); } *pit=atan2_approx(dy,hs); }
 static u64 pf_n, pf_sum, pf_max, pf_hist[6], pf_dbg, pf_sec[16], pf_memq, pf_cur[16], pf_maxsec[16];   // perf: polls, ticks (19.2 MHz) in process() without the debug channel, max, histogram (<5/10/20/50/100/more us)
+// per-poll recorder: "rec base o1 o2 o3 o4 n [tx ty]" samples 4 u32/floats at base+o_i (plus the injected buttons) for n polls,
+// optionally tapping (tx,ty) on the first one; "recd" prints them
+#define REC_MAX 400
+static u64 rec_base, rec_off[4]; static u32 rec_v[REC_MAX][5]; static int rec_n, rec_i, rec_tap, rec_tx, rec_ty;
+static void rec_poll(u64 inj){ if(rec_i>=rec_n) return; if(rec_tap){ rec_tap=0; dbg_tap_x=rec_tx; dbg_tap_y=rec_ty; dbg_tap=1; }
+  for(int k=0;k<4;k++) rec_v[rec_i][k]=RD32(rec_base+rec_off[k]); rec_v[rec_i][4]=(u32)inj; rec_i++; }
 // extra debug commands that need the touch logic
 static void dbg_ext(const char*p){
   if(starts(p,"pick")){ p+=4; float x=(float)(s64)parse_num(&p), y=(float)(s64)parse_num(&p); int i=-1,j=-1,oi_=-1,oj=-1; float fx=0,fz=0;
@@ -67,6 +73,9 @@ static void dbg_ext(const char*p){
     ncand=k; os("fdel n="); oi(k); oc('\n'); for(u32 i=0;i<k&&i<30;i++){ ox(cand[i]); oc(' '); if(isf) of(*(volatile float*)cand[i]); else oi((s32)candv[i]); oc('\n'); } }
   else if(starts(p,"rsr")){ os("rs dyaw "); of(dbg_dyaw); os(" dpit "); of(dbg_dpit); os(" left "); oi(dbg_rs_n); oc('\n'); }
   else if(starts(p,"rs")){ p+=2; dbg_rs_x=(s32)(s64)parse_num(&p); dbg_rs_y=(s32)(s64)parse_num(&p); dbg_rs_n=dbg_rs_tot=(int)parse_num(&p); cam_angles(&dbg_yaw0,&dbg_pit0); dbg_dyaw=dbg_dpit=0; os("rs\n"); }
+  else if(starts(p,"recd")){ for(int i=0;i<rec_i;i++){ oi(i); for(int k=0;k<4;k++){ oc(' '); of(*(float*)&rec_v[i][k]); oc('/'); ox(rec_v[i][k]); } oc(' '); ox(rec_v[i][4]); oc(10); } }
+  else if(starts(p,"rec")){ p+=3; rec_base=parse_num(&p); for(int k=0;k<4;k++) rec_off[k]=parse_num(&p); rec_n=(int)parse_num(&p); if(rec_n>REC_MAX) rec_n=REC_MAX;
+    rec_tx=(int)parse_num(&p); rec_ty=(int)parse_num(&p); rec_tap= rec_tx||rec_ty; rec_i=0; os("rec"); oc(10); }
   else if(starts(p,"ang")){ float a,b; cam_angles(&a,&b); os("yaw "); of(a); os(" pit "); of(b); oc('\n'); }
   else if(starts(p,"ls")){ p+=2; dbg_ls_x=(s32)(s64)parse_num(&p); dbg_ls_y=(s32)(s64)parse_num(&p); dbg_ls_n=(int)parse_num(&p); os("ls\n"); }
   else if(starts(p,"perfreset")){ pf_n=pf_sum=pf_max=0; for(int i=0;i<6;i++) pf_hist[i]=0; for(int i=0;i<16;i++){ pf_sec[i]=0; pf_maxsec[i]=0; } g_memq=0; os("perf reset"); oc(10); }
@@ -162,6 +171,9 @@ static void process_(NpadState*s,u32 id,u64 lr){
 #ifdef TM_DEBUG
   if(dbg_ls_n>0){ s->l.x=dbg_ls_x; s->l.y=dbg_ls_y; if(id==g_primary_id) dbg_ls_n--; }
   if(dbg_rs_n>0){ s->r.x=dbg_rs_x; s->r.y=dbg_rs_y; if(id==g_primary_id){ float a,b; cam_angles(&a,&b); float d=a-dbg_yaw0; if(d>3.14159f) d-=6.28318f; if(d<-3.14159f) d+=6.28318f; dbg_dyaw+=d; dbg_yaw0=a; dbg_dpit+=b-dbg_pit0; dbg_pit0=b; dbg_rs_n--; } }
+#endif
+#ifdef TM_DEBUG
+  if(id==g_primary_id) rec_poll(cur_inject|cur_inject_dbg);
 #endif
   if(s->buttons&0xffffffu) g_touch_mode=0; // real controller/keyboard input brings the cursor back
   s->buttons|=cur_inject;

@@ -658,27 +658,26 @@ static int convoy_tap(u64 g,float x,float y){
   if(y>=88.f&&y<=128.f&&x>=420.f&&x<=500.f){ q_push(BTN_RB,2,4); return 1; }
   if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ q_push(BTN_X,2,4); return 1; }
   // convoy list rows
+  // G+0x111e8 is the selected row within the 11 visible ones (not the absolute index), G+0x111e4 the first visible row.
   if(x>=665.f&&x<=1150.f&&y>=214.f&&y<=650.f){
-    if(!foc){ q_push(BTN_ZR,1,3); retap_later(x,y,6); return 1; }
-    // G+0x111e8 is the selected row within the 11 visible ones (not the absolute index), G+0x111e4 the first visible row.
-    // Instant: put the row next to the target and take one real step (the row record G+0x111c0 is looked up on each step).
     s32 cnt=RDS32(g+CV_CNT), top=RDS32(g+CV_TOP), ci=RDS32(g+CV_IDX); if(cnt<=0||top<0||ci<0||ci>10) return 1;
     int t=(int)((y-214.4f)/35.2f), d=t-ci;   // visible row index (row 0 centre = 232)
     if(t<0||t>10||top+t>=cnt) return 1;      // below the last row
-    // the selected row confirms at once, except on the replay after the focus came over from the unit list (the convoy shows no
-    // selection while it hasn't the focus, so the remembered row would confirm out of the blue)
-    int conf=dt_same(g+CV_IDX,t,g+CV_TOP,top) || (!d && !q_busy() && rt_depth==0);
+    // from the unit list: instant. The convoy looks its row record up again when it takes the focus, so the row is written
+    // first and ZR (keeps the tab) moves the hand straight onto it; selected only, the next tap confirms
+    if(!foc){ *(volatile s32*)(g+CV_IDX)=t; q_push(BTN_ZR,2,3); dt_arm(g+CV_IDX,t,g+CV_TOP,top); tm_log2("convoy row from unit",top+t,0); return 1; }
+    // Instant: put the row next to the target and take one real step (the row record G+0x111c0 is looked up on each step).
+    int conf=dt_same(g+CV_IDX,t,g+CV_TOP,top) || (!d && !q_busy());   // the selected row confirms at once
     if(d){ int pre= d>0 ? t-1 : t+1; if(pre!=ci) *(volatile s32*)(g+CV_IDX)=pre; g_learn_hold=20; q_push(d>0?BTN_D:BTN_U,2,3); }
     if(conf){ dt_on=0; q_push(BTN_A,2,3); } else dt_arm(g+CV_IDX,t,g+CV_TOP,top);   // double tap to confirm
     tm_log2("convoy row",top+t,top+ci); return 1; }
   // unit item list
   if(x>=110.f&&x<=490.f&&y>=268.f&&y<=500.f){
-    // back to the unit list: ZL moves the focus there and keeps the convoy's tab (Left on the first tab does too, but walking
-    // back to it flipped the convoy to the first tab)
-    if(foc){ q_push(BTN_ZL,2,3); retap_later(x,y,6); return 1; }
-    if(rt_depth>0){   // replay after the focus change: select only (no selection was shown on this list), the next tap confirms
-      s32 cnt=RDS32(ul+0x54); int it=(int)((y-286.6f)/35.2f+0.5f+100.f)-100; if(cnt<=0||cnt>40||it<0||it>=cnt) return 1;
-      if(RDS32(ul+0x4c)!=it) list_jump(ul,it,0); dt_arm(ul+0x4c,it,0,0); tm_log2("unit items sel",it,0); return 1; }
+    // from the convoy: instant. SetIndex on the (unfocused) unit list, then ZL moves the focus there (keeping the convoy's tab;
+    // Left on the first tab would flip the convoy to it) and the hand lands right on the row; selected only, the next tap confirms
+    if(foc){ s32 n=RDS32(ul+0x54); int it=(int)((y-286.6f)/35.2f+0.5f+100.f)-100; if(n<=0||n>40||it<0||it>=n) return 1;
+      if(RDS32(ul+0x4c)!=it) ((SetIdxFn)(g_main+0x5de5b0))(ul,it);
+      q_push(BTN_ZL,2,3); dt_arm(ul+0x4c,it,0,0); tm_log2("unit items from convoy",it,0); return 1; }
     rows_pick(ul,x,y,110.f,490.f,286.6f,35.2f,"unit items"); return 1; }
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
@@ -1263,10 +1262,13 @@ static void on_tap(float x,float y){
           if(done) wait_then_a(tx,ty); else chase_start(tx,ty,1); }
         tm_log2("prep tile",tx*100+ty,want_a); }
       return; } }
-  if(in_battle && phase==0 && y>=684.f && y<=716.f){        // prompts: X Details (unit under the cursor), ZR Danger Area
-    if(x>=962.f&&x<=1069.f){ press(BTN_X); return; }
-    if(x>=1120.f&&x<=1264.f){ press(BTN_ZR); return; }
-    if(x>=770.f&&x<=910.f){ press(BTN_ZL); return; } }       // ZL Divine Pulse (shown from turn 2 while charges remain)
+  // prompts: X Details (unit under the cursor), ZR Danger Area, ZL Divine Pulse (from turn 2 while charges remain). Only while the
+  // game shows them (prompt bar codes, see prompt_bar_has): they're gone while a unit is selected and come back a little after
+  // phase 0 returns; until then a tap there is a tile tap
+  if(in_battle && phase==0 && y>=684.f && y<=716.f){ u64 g=cmn_ui();
+    if(g && x>=962.f&&x<=1069.f && prompt_bar_has(g,0x1000)){ press(BTN_X); return; }
+    if(g && x>=1120.f&&x<=1264.f && prompt_bar_has(g,0x200)){ press(BTN_ZR); return; }
+    if(g && x>=770.f&&x<=910.f && prompt_bar_has(g,0x100)){ press(BTN_ZL); return; } }
   if(in_battle && (phase==0||phase==1)){
     int tx,ty; if(pick_tile(x,y,&tx,&ty)){ int cx,cy; cursor_get(&cx,&cy);
       if(tlog){ Buf bb={0}; bstr(&bb,"[touchmod] tile "); bint(&bb,tx); bput(&bb,','); bint(&bb,ty); bstr(&bb," cur "); bint(&bb,cx); bput(&bb,','); bint(&bb,cy); bflush(&bb); }
@@ -1281,9 +1283,15 @@ static void on_tap(float x,float y){
         // the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
         g_move_hide=0;   // a new destination: the cursor shows again right away (cursor_hide_tick restores it)
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
-        dmap_from_cam(); for(int k=0;k<4&&!done;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
-          if(nx==cx&&ny==cy){ q_push(dbtn[k],1,2); done=1; break; }
-          if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,2); done=1; } }
+        // The jump doesn't snap (SetCursor snap=0 only moves the target, battle+0x3b30/38; the drawn cursor +0x3b50/58 glides there),
+        // and the neighbour is the one on the cursor's side, so the highlight glides once to the destination instead of popping next
+        // to it and then sliding the last tile
+        dmap_from_cam(); int bk=-1, bd=1<<30;
+        for(int k=0;k<4;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
+          int dd=(nx-cx)*(nx-cx)+(ny-cy)*(ny-cy); if(dd<bd){ bd=dd; bk=k; } }
+        if(bk>=0){ int nx=tx-dmap_dx[bk], ny=ty-dmap_dy[bk];
+          if(nx==cx&&ny==cy){ q_push(dbtn[bk],1,2); done=1; }
+          else { set_cursor_raw(nx,ny,0); if(RDS32(bb+4)==nx&&RDS32(bb+8)==ny){ q_push(0,1,0); q_push(dbtn[bk],1,2); done=1; } } }
         if(!done) chase_start(tx,ty,0);
         tm_log2("move target",tx*100+ty,0);
       }
