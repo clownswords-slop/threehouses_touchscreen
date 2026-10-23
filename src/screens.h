@@ -583,7 +583,10 @@ static int talk_tap(u64 g,float x,float y){
 // (+0x30 / 1.5), so they follow the layout. A tap moves the focus there directly (no d-pad walking); the game redraws the hand and
 // the help text.
 static const Prompt bdetail_prompts[]={ {836.f,957.f,BTN_PLUS}, {1011.f,1113.f,BTN_X}, {1171.f,1264.f,BTN_B} };
-static float bd_row(int page,int r){ if(page==0) return r<2 ? 40.f*(float)r : 128.f+35.2f*(float)(r-2); return 35.2f*(float)r; }
+// Monster page 4 (Inventory / Barrier / Barrier Ability / Latent Abilities, each section under its own header): rows at hand y
+// 0 / 86.7 / 174 / 261.3, then 34.67 apart; page 5 (Staggering Blow): one row at the top
+static float bd_row(int page,int r){ if(page==0) return r<2 ? 40.f*(float)r : 128.f+35.2f*(float)(r-2);
+  if(page==4) return r<3 ? 87.f*(float)r : 261.3f+34.67f*(float)(r-3); return 35.2f*(float)r; }
 #define BD_GRAPH 0x9ab60
 typedef struct { u32 off; signed char r,c; float x0,x1,y0,y1; } BdItem;   // y0/y1 relative to the list's y origin (720p)
 static const BdItem bd_items[]={
@@ -610,12 +613,13 @@ static u64 bd_graph(void){ u64 b=battle(); if(!b || RDS32(b+0x3cc0)!=16) return 
   if(RD64(gr)!=g_main+0x19ee750) return 0; u32 n=RD32(gr+0x34); if(n<1||n>8) return 0; return gr; }
 static int bdet_det_now(void){ u64 gr=bd_graph(); return gr && *(volatile u8*)(gr+0x30); }
 static u64 bd_node_of(u64 gr,u64 L){ u32 n=RD32(gr+0x34); for(u32 k=0;k<n;k++){ u64 nd=gr+0x38+(u64)k*0x30; if(RD64(nd)==L) return nd; } return 0; }
-// the right-hand list: rows from the hand when it is there, else from the list's origin (Inventory page 0 / Combat Arts page 2)
+// the right-hand list: rows from the hand when it is there, else from the list's origin (Inventory page 0 / Combat Arts page 2 /
+// monster pages 4, 5)
 static int bd_inv_row(u64 g,u64 L,int foc,float x,float y){
   if(x<835.f||x>1215.f) return -1; s32 page=RDS32(L+0xfe0), idx=RDS32(L+0x4c), cnt=RDS32(L+0x54); if(cnt<=0||cnt>20) return -1;
   float base;
   if(foc && idx>=0 && idx<cnt) base=RDF(g+0x30)/1.5f-1.f-bd_row(page,idx);
-  else if(page==0) base=RDF(L+0x30)/1.5f+33.f; else if(page==2) base=RDF(L+0x30)/1.5f+74.3f; else return -1;
+  else if(page==0||page==4||page==5) base=RDF(L+0x30)/1.5f+33.f; else if(page==2) base=RDF(L+0x30)/1.5f+74.3f; else return -1;
   int best=-1; float bd=1e9f; for(int r=0;r<cnt;r++){ float d=y-(base+bd_row(page,r)); if(d<0)d=-d; if(d<bd){ bd=d; best=r; } }
   return bd<=19.f ? best : -1; }
 // Battalion page (page owner+0xfe0 = 3): rows at the list's y origin (+0x30, 1080p) + 74.3 / 115 / 147 (hand y, 720p); row 1 has
@@ -643,7 +647,11 @@ static int bdetail_tap(u64 g,float x,float y){
     if(e->off==0x7c7c8){ if(RDS32(W+0x54)==5) er++;                     // status row on top
       int nc=*(volatile u8*)(W+0x53c+er); if(nc>=1 && nc<=13 && e->c>=nc) continue; }   // e.g. no battalion: one item in the crest row
     if(er>=0 && er>=RDS32(W+0x54)) continue; if(e->c>=RDS32(W+0x58) && e->c>0) continue;
-    L=W; r=er; c=e->c; break; }
+    L=W; r=er; c=e->c;
+    // monsters: the HP row has 3 items (HP, the barrier gem, Mv) and the class row 3 (class, two movement icons)
+    if(e->off==0x7c7c8 && (e->r==2||e->r==3) && *(volatile u8*)(W+0x53c+er)==3){
+      c= e->r==2 ? (x<176.f?0: x<209.f?1:2) : (x<266.f?0: x<293.f?1:2); }
+    break; }
   if(!L) return 1;
   if(!det){                                                    // outside Details: rows of the right-hand list as before, the rest opens Details first
     if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)) list_jump(L,r,0); tm_log2("bdetail",r,0); return 1; }
