@@ -1,23 +1,5 @@
 static u64 g_main;
-// debug command channel via sd card
-typedef struct { void* h; } FH;
-typedef struct { int flags; } WOpt;
-IMPORT(u32,_ZN2nn2fs19MountSdCardForDebugEPKc,FsMountSd,const char*)
-IMPORT(u32,_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci,FsOpen,FH*,const char*,int)
-IMPORT(u32,_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE,FsSize,s64*,FH)
-IMPORT(u32,_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvmRKNS0_10ReadOptionE,FsReadN,u64*,FH,s64,void*,u64,const WOpt*)   // the overload with the byte count: a short read (the host rewriting cmd.txt) is not an abort
-IMPORT(u32,_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE,FsWrite,FH,s64,const void*,u64,const WOpt*)
-IMPORT(void,_ZN2nn2fs9CloseFileENS0_10FileHandleE,FsClose,FH)
-IMPORT(u32,_ZN2nn2fs10CreateFileEPKcl,FsCreate,const char*,s64)
-IMPORT(u32,_ZN2nn2fs10DeleteFileEPKc,FsDelete,const char*)
-#define FsMountSd FsMountSd_p()
-#define FsOpen FsOpen_p()
-#define FsSize FsSize_p()
-#define FsReadN FsReadN_p()
-#define FsWrite FsWrite_p()
-#define FsClose FsClose_p()
-#define FsCreate FsCreate_p()
-#define FsDelete FsDelete_p()
+// debug command channel via sd card (file access: fs.h)
 
 typedef struct { u64 addr, size; u32 type, attr, perm, ipc, dev, pad; } MemInfo;
 static inline u32 svcQueryMemory(MemInfo* mi, u32* pi, u64 addr){ register u64 x0 asm("x0")=(u64)mi; register u64 x1 asm("x1")=0; register u64 x2 asm("x2")=addr; asm volatile("svc 0x6":"+r"(x0),"+r"(x1),"+r"(x2)::"x3","x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","cc","memory"); *pi=(u32)x1; return (u32)x0; }
@@ -110,7 +92,7 @@ static void do_cmd_line(const char*p);
 static void dbg_ext(const char*p);
 static char cbuf[4096];
 static void poll_cmd(void){
-  if(!mounted){ mounted=1; u32 r=FsMountSd("sd"); mount_rc=r; Buf b={0}; bstr(&b,"[touchmod] mount sd r="); bhex(&b,r); bflush(&b); mod_lo=(u64)__nx_mod0-0x10000; mod_hi=(u64)__nx_mod0+0x10000000; }
+  if(!mounted){ mounted=1; u32 r=sd_mount(); mount_rc=r; Buf b={0}; bstr(&b,"[touchmod] mount sd r="); bhex(&b,r); bflush(&b); mod_lo=(u64)__nx_mod0-0x10000; mod_hi=(u64)__nx_mod0+0x10000000; }
   if(mount_rc) return;
   FH h; if(FsOpen(&h,"sd:/touchmod/cmd.txt",1)) return; s64 sz=0; FsSize(&sz,h); if(sz>4095) sz=4095; u64 got=0; WOpt ro={0}; if(sz>0 && FsReadN(&got,h,0,cbuf,(u64)sz,&ro)) got=0; FsClose(h); if(got>(u64)sz) got=0; cbuf[got]=0;
   const char*p=cbuf; int seq=(int)parse_num(&p); if(seq==lastseq) return; lastseq=seq;

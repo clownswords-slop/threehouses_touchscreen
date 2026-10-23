@@ -18,13 +18,16 @@ IMPORT(int,_ZN2nn3hid20GetTouchScreenStatesILm1EEEiPNS0_16TouchScreenStateIXT_EE
 #define InitTouch InitTouch_p()
 #define GetTouch1 GetTouch1_p()
 
+#include "fs.h"
 #ifdef TM_DEBUG
 #include "dbg.h"
 #else
 typedef struct { u64 addr, size; u32 type, attr, perm, ipc, dev, pad; } MemInfo;
 static inline u32 svcQueryMemory(MemInfo* mi, u32* pi, u64 addr){ register u64 x0 asm("x0")=(u64)mi; register u64 x1 asm("x1")=0; register u64 x2 asm("x2")=addr; asm volatile("svc 0x6":"+r"(x0),"+r"(x1),"+r"(x2)::"x3","x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","cc","memory"); *pi=(u32)x1; return (u32)x0; }
 #endif
+#include "patch.h"
 #include "touch.h"
+#include "opts.h"
 #ifndef TM_DEBUG
 #define TLOG_OFF 1
 #endif
@@ -38,6 +41,8 @@ static float atan2_approx(float y,float x){ // good to ~0.005 rad
 static void cam_angles(float*yaw,float*pit){ u64 c=RD64(g_main+0x1ab8480); *yaw=0; *pit=0; if(!c||!mem_ok(c)) return; float dx=RDF(c+0x80)-RDF(c+0x90), dy=RDF(c+0x84)-RDF(c+0x94), dz=RDF(c+0x88)-RDF(c+0x98);
   *yaw=atan2_approx(dz,dx); float h=dx*dx+dz*dz; float hs=h; for(int i=0;i<20;i++){ if(hs<=0) break; hs=0.5f*(hs+h/hs); } *pit=atan2_approx(dy,hs); }
 static u64 pf_n, pf_sum, pf_max, pf_hist[6], pf_dbg, pf_sec[16], pf_memq, pf_cur[16], pf_maxsec[16];   // perf: polls, ticks (19.2 MHz) in process() without the debug channel, max, histogram (<5/10/20/50/100/more us)
+__attribute__((noinline)) int pt_fn(void){ return 1; }   // code-patching test target (ptest)
+__attribute__((noinline)) static int pt_fn_call(void){ int (*volatile f)(void)=pt_fn; return f(); }
 // per-poll recorder: "rec base o1 o2 o3 o4 n [tx ty]" samples 4 u32/floats at base+o_i (plus the injected buttons) for n polls,
 // optionally tapping (tx,ty) on the first one; "recd" prints them
 #define REC_MAX 400
@@ -73,6 +78,19 @@ static void dbg_ext(const char*p){
     ncand=k; os("fdel n="); oi(k); oc('\n'); for(u32 i=0;i<k&&i<30;i++){ ox(cand[i]); oc(' '); if(isf) of(*(volatile float*)cand[i]); else oi((s32)candv[i]); oc('\n'); } }
   else if(starts(p,"rsr")){ os("rs dyaw "); of(dbg_dyaw); os(" dpit "); of(dbg_dpit); os(" left "); oi(dbg_rs_n); oc('\n'); }
   else if(starts(p,"rs")){ p+=2; dbg_rs_x=(s32)(s64)parse_num(&p); dbg_rs_y=(s32)(s64)parse_num(&p); dbg_rs_n=dbg_rs_tot=(int)parse_num(&p); cam_angles(&dbg_yaw0,&dbg_pit0); dbg_dyaw=dbg_dpit=0; os("rs\n"); }
+  else if(starts(p,"cw32")){ p+=4; u64 a=parse_num(&p); u32 v=(u32)parse_num(&p); if(a<0x10000000) a+=g_main;   // write one instruction into code
+    u32 old=RD32(a); int ok=code_write32(a,v); os("cw32 "); ox(a); oc(' '); ox(old); os(" -> "); ox(RD32(a)); os(" ok="); oi(ok); os(" rc="); ox(g_patch_rc); oc(10); }
+  else if(starts(p,"ptest")){ p+=5; int m=(int)parse_num(&p); u64 f=(u64)&pt_fn; os("before "); oi(pt_fn_call()); oc(' ');
+    if(m==1){ int ok=code_write32(f,0x52800040u); os("map ok="); oi(ok); os(" rc="); ox(g_patch_rc); }
+    else if(m==4){ os("self handle "); ox(self_handle()); os(" rc="); ox(g_patch_rc); }
+    else if(m==2){ u64 pg=f&~0xfffull; u32 r=svcSetProcessMemoryPermission(self_handle(),pg,0x1000,3); os("perm rw rc="); ox(r);
+      if(!r){ *(volatile u32*)f=0x52800060u; icache_sync(f,f,4); r=svcSetProcessMemoryPermission(CUR_PROCESS,pg,0x1000,5); os(" back rc="); ox(r); } }
+    else if(m==3){ os("free va "); ox(free_va(0x2000)); }
+    os(" after "); oi(pt_fn_call()); oc(10); }
+  else if(starts(p,"mfile")){ p+=5; u64 a=parse_num(&p); u64 n=parse_num(&p);   // raw memory -> sd:/touchmod/mem.bin (copied through a buffer, unmapped pages skipped as zeros)
+    static u8 mb[0x10000]; FsDelete("sd:/touchmod/mem.bin"); FsCreate("sd:/touchmod/mem.bin",(s64)n); FH h; if(FsOpen(&h,"sd:/touchmod/mem.bin",2)){ os("open fail"); oc(10); return; }
+    WOpt o={0}; for(u64 off=0;off<n;off+=sizeof(mb)){ u64 k=n-off; if(k>sizeof(mb)) k=sizeof(mb); if(mem_ok(a+off)) for(u64 i=0;i<k;i++) mb[i]=*(volatile u8*)(a+off+i); else for(u64 i=0;i<k;i++) mb[i]=0; FsWrite(h,(s64)off,mb,k,&o); }
+    WOpt f={1}; FsWrite(h,0,mb,0,&f); FsClose(h); os("mfile ok"); oc(10); }
   else if(starts(p,"recd")){ for(int i=0;i<rec_i;i++){ oi(i); for(int k=0;k<4;k++){ oc(' '); of(*(float*)&rec_v[i][k]); oc('/'); ox(rec_v[i][k]); } oc(' '); ox(rec_v[i][4]); oc(10); } }
   else if(starts(p,"rec")){ p+=3; rec_base=parse_num(&p); for(int k=0;k<4;k++) rec_off[k]=parse_num(&p); rec_n=(int)parse_num(&p); if(rec_n>REC_MAX) rec_n=REC_MAX;
     rec_tx=(int)parse_num(&p); rec_ty=(int)parse_num(&p); rec_tap= rec_tx||rec_ty; rec_i=0; os("rec"); oc(10); }
@@ -166,6 +184,7 @@ static void process_(NpadState*s,u32 id,u64 lr){
     PF(11, dt_tick());
     PF(13, cur_inject=q_tick()|hold_tick());
     PF(14, cam_tick());
+    PF(12, opts_tick());
   }
   if(g_rs_x||g_rs_y){ s->r.x=g_rs_x; s->r.y=g_rs_y; }
 #ifdef TM_DEBUG
@@ -180,6 +199,9 @@ static void process_(NpadState*s,u32 id,u64 lr){
 #ifdef TM_DEBUG
   s->buttons|=cur_inject_dbg;
 #endif
+  // Options -> TouchMod row: left / right change the mod's option and are hidden from the game
+  if(id==g_primary_id) opts_buttons(s->buttons);
+  if(g_opt_mask){ s->buttons&=~g_opt_mask; s->l.x=0; s->r.x=0; }
 }
 #define HOOK(kind,Fn) { if(!Fn){ memset(s,0,sizeof(*s)); return; } Fn(s,1,id); process(s,*id,(u64)__builtin_return_address(0)); }
 void _ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj(NpadState*s,const u32*id) HOOK(0,GetStatesFull)

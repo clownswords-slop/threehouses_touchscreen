@@ -249,6 +249,7 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 // so while in touch mode we hide it again whenever it comes back, and restore it on real button input.
 typedef void (*CurShowFn)(u64 b,int show);
 static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
+static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
 static void cursor_hide_tick(void){
@@ -681,23 +682,27 @@ static int convoy_tap(u64 g,float x,float y){
     rows_pick(ul,x,y,110.f,490.f,286.6f,35.2f,"unit items"); return 1; }
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
-// Options screen (map menu -> Options): common UI list at G+0x2250, tabs Battle/Monastery/General
+// Options screen (map menu -> Options): common UI list at G+0x2250, tabs Battle/Monastery/General (+ TouchMod, opts.h)
+static int opts_tabs4(void); static int opts_our_row(int it); static void opts_tap_value(float x);
 #define OP_LIST 0x2250   // vtable main+0x1a431f8; +0x4c idx, +0x54 cnt, u16 at +0x6a = first visible row
 #define OP_TAB  0x2bd0   // 0 Battle, 1 Monastery, 2 General (ZL/ZR)
 static int options_tap(u64 g,float x,float y){
   u64 w=g+OP_LIST; if(!is_widget(w,0x1a431f8)) return 0;
   s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54), tab=RDS32(g+OP_TAB); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
   if(inbox(x,y,1100.f,1264.f,682.f,718.f)){ q_push(BTN_MINUS,2,4); return 1; }   // "- Restore defaults"
-  if(y>=108.f&&y<=158.f){ // tab strip
-    int k=-1; if(x>=290.f&&x<=380.f) k=tab-1; else if(x>=900.f&&x<=1000.f) k=tab+1; else if(x>=455.f&&x<=820.f) k=(int)((x-519.f)/120.f+0.5f);
-    if(k<0||k>2||(tab<0||tab>2)) return 1;
+  if(y>=108.f&&y<=158.f){ // tab strip (4 tabs with the TouchMod tab, opts.h: 720p x 460 / 580 / 700 / 820)
+    int nt= opts_tabs4() ? 4 : 3; tab&=0xff;
+    int k=-1; if(x>=290.f&&x<=380.f) k=tab-1; else if(x>=900.f&&x<=1000.f) k=tab+1;
+    else if(nt==4 && x>=400.f&&x<=880.f) k=(int)((x-460.f)/120.f+0.5f); else if(nt==3 && x>=455.f&&x<=820.f) k=(int)((x-519.f)/120.f+0.5f);
+    if(k<0||k>=nt||tab>=nt) return 1;
     if(k==tab) return 1;
     // instant: put the tab next to the target, one real ZL/ZR step loads it (as with the convoy tabs)
-    *(volatile s32*)(g+OP_TAB)= k>tab ? k-1 : k+1; q_push(k>tab?BTN_ZR:BTN_ZL,2,4);
+    *(volatile u8*)(g+OP_TAB)= (u8)(k>tab ? k-1 : k+1); q_push(k>tab?BTN_ZR:BTN_ZL,2,4);
     tm_log2("options tab",k,tab); return 1; }
   if(x>=300.f&&x<=975.f&&y>=185.f&&y<=556.f){
     int top=(int)((RD32(w+0x68)>>16)&0xffff); if(top<0||top>=cnt) top=0;
     int r=(int)((y-185.1f)/34.8f); int it=top+r; if(it<0||it>=cnt) return 1;
+    if(opts_our_row(it)){ opts_tap_value(x); tm_log2("options touchmod row",(s64)x,0); return 1; }   // TouchMod tab: the mod's own option
     list_jump(w,it,0);
     if(x>=655.f&&x<=735.f) q_push(BTN_L,2,3);        // left arrow
     else if(x>=770.f) q_push(BTN_R,2,3);              // value or right arrow
@@ -1279,8 +1284,8 @@ static void on_tap(float x,float y){
         // outside the blue/red range: ignore instead of confirming "stay here"
       }
       else if(phase==1){
-        // first tap: only put the cursor on the destination (the game draws the path); a tap on the tile under the cursor confirms
-        // the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
+        // first tap (Tap To Move: Normal): only put the cursor on the destination (the game draws the path); a tap on the tile under
+        // the cursor confirms the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
         g_move_hide=0;   // a new destination: the cursor shows again right away (cursor_hide_tick restores it)
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
         // The jump doesn't snap (SetCursor snap=0 only moves the target, battle+0x3b30/38; the drawn cursor +0x3b50/58 glides there),
@@ -1292,8 +1297,11 @@ static void on_tap(float x,float y){
         if(bk>=0){ int nx=tx-dmap_dx[bk], ny=ty-dmap_dy[bk];
           if(nx==cx&&ny==cy){ q_push(dbtn[bk],1,2); done=1; }
           else { set_cursor_raw(nx,ny,0); if(RDS32(bb+4)==nx&&RDS32(bb+8)==ny){ q_push(0,1,0); q_push(dbtn[bk],1,2); done=1; } } }
-        if(!done) chase_start(tx,ty,0);
-        tm_log2("move target",tx*100+ty,0);
+        // Tap To Move: Instant confirms right away (A once the cursor is there); Instant when safe only on a tile no enemy can
+        // reach this turn (map cell +0x27 bit 0, the game's Danger Area, kept up to date whether or not it is shown)
+        int instant= g_tap_mode==1 || (g_tap_mode==2 && cell_at(tx,ty) && !(*(volatile u8*)(cell_at(tx,ty)+0x27)&1));
+        if(!done) chase_start(tx,ty,instant); else if(instant) wait_then_a(tx,ty);
+        tm_log2("move target",tx*100+ty,instant);
       }
       else if(set_cursor_instant(tx,ty)){ if(want_a){ q_push(0,2,0); q_push(BTN_A,2,3); } }
       else chase_start(tx,ty,want_a);
