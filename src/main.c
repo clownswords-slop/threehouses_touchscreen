@@ -43,6 +43,15 @@ static void cam_angles(float*yaw,float*pit){ u64 c=RD64(g_main+0x1ab8480); *yaw=
 static u64 pf_n, pf_sum, pf_max, pf_hist[6], pf_dbg, pf_sec[16], pf_memq, pf_cur[16], pf_maxsec[16];   // perf: polls, ticks (19.2 MHz) in process() without the debug channel, max, histogram (<5/10/20/50/100/more us)
 __attribute__((noinline)) int pt_fn(void){ return 1; }   // code-patching test target (ptest)
 __attribute__((noinline)) static int pt_fn_call(void){ int (*volatile f)(void)=pt_fn; return f(); }
+// synthetic drag: "drag x0 y0 x1 y1 n [hold]" moves a finger from (x0,y0) to (x1,y1) over n polls (720p), keeps it there for
+// `hold` polls, then lifts it; fed to touch_update instead of the real touch screen while it runs
+static int dg_n, dg_i, dg_hold; static float dg_x0, dg_y0, dg_x1, dg_y1; static s64 dg_samp;
+static int drag_poll(void){ if(dg_n<=0) return 0;
+  TouchScreenState1 f; for(u32 i=0;i<sizeof(f);i++) ((u8*)&f)[i]=0; f.sampling=++dg_samp+(1ll<<40);
+  int tot=dg_n+dg_hold;
+  if(dg_i<tot){ float t= dg_i>=dg_n ? 1.f : (float)dg_i/(float)(dg_n>1?dg_n-1:1); f.count=1; f.t[0].x=(s32)(dg_x0+(dg_x1-dg_x0)*t); f.t[0].y=(s32)(dg_y0+(dg_y1-dg_y0)*t); }
+  else f.count=0;
+  touch_update(&f); if(++dg_i>tot){ dg_n=0; } return 1; }
 // per-poll recorder: "rec base o1 o2 o3 o4 n [tx ty]" samples 4 u32/floats at base+o_i (plus the injected buttons) for n polls,
 // optionally tapping (tx,ty) on the first one; "recd" prints them
 #define REC_MAX 400
@@ -91,6 +100,9 @@ static void dbg_ext(const char*p){
     static u8 mb[0x10000]; FsDelete("sd:/touchmod/mem.bin"); FsCreate("sd:/touchmod/mem.bin",(s64)n); FH h; if(FsOpen(&h,"sd:/touchmod/mem.bin",2)){ os("open fail"); oc(10); return; }
     WOpt o={0}; for(u64 off=0;off<n;off+=sizeof(mb)){ u64 k=n-off; if(k>sizeof(mb)) k=sizeof(mb); if(mem_ok(a+off)) for(u64 i=0;i<k;i++) mb[i]=*(volatile u8*)(a+off+i); else for(u64 i=0;i<k;i++) mb[i]=0; FsWrite(h,(s64)off,mb,k,&o); }
     WOpt f={1}; FsWrite(h,0,mb,0,&f); FsClose(h); os("mfile ok"); oc(10); }
+  else if(starts(p,"csens")){ p+=5; g_cam_sens[0]=(int)parse_num(&p); g_cam_sens[1]=(int)parse_num(&p); os("csens"); oc(10); }
+  else if(starts(p,"drag")){ p+=4; dg_x0=(float)(s64)parse_num(&p); dg_y0=(float)(s64)parse_num(&p); dg_x1=(float)(s64)parse_num(&p); dg_y1=(float)(s64)parse_num(&p);
+    dg_n=(int)parse_num(&p); dg_hold=(int)parse_num(&p); dg_i=0; os("drag"); oc(10); }
   else if(starts(p,"recd")){ for(int i=0;i<rec_i;i++){ oi(i); for(int k=0;k<4;k++){ oc(' '); of(*(float*)&rec_v[i][k]); oc('/'); ox(rec_v[i][k]); } oc(' '); ox(rec_v[i][4]); oc(10); } }
   else if(starts(p,"rec")){ p+=3; rec_base=parse_num(&p); for(int k=0;k<4;k++) rec_off[k]=parse_num(&p); rec_n=(int)parse_num(&p); if(rec_n>REC_MAX) rec_n=REC_MAX;
     rec_tx=(int)parse_num(&p); rec_ty=(int)parse_num(&p); rec_tap= rec_tx||rec_ty; rec_i=0; os("rec"); oc(10); }
@@ -168,6 +180,9 @@ static void process_(NpadState*s,u32 id,u64 lr){
     if(dbg_tap){ dbg_tap=0; on_tap((float)dbg_tap_x,(float)dbg_tap_y); }
     if(inj_frames>0){ inj_frames--; cur_inject_dbg=inj_buttons; } else cur_inject_dbg=0;
     if(mash_n>0){ mash_n--; if((mash_i++%mash_period)<2) cur_inject_dbg|=mash_mask; }
+#endif
+#ifdef TM_DEBUG
+    if(!drag_poll())
 #endif
     PF(0, if(GetTouchN){ int n=GetTouchN(tsh,16); if(n>16) n=16;
       for(int i=n-1;i>=0;i--){ if(tsh[i].sampling>last_samp){ last_samp=tsh[i].sampling; PF(1, touch_update(&tsh[i])); } } }
