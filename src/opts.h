@@ -21,7 +21,7 @@ static const char* const tap_mode_name[3]={ "Normal", "Instant", "Instant when s
 static const char* const tap_mode_desc[3]={
   "Tapping a tile with a unit selected does not confirm movement.",
   "Tapping a tile with a unit selected confirms movement.",
-  "Tapping a tile with a unit selected confirms movement if the movement would not place the unit in range of an enemy's attack." };
+  "Tapping a tile with a unit selected confirms movement if it would not place the unit in range of an enemy's attack." };
 #define HIDDEN __attribute__((visibility("hidden")))
 HIDDEN const char tm_str_tab[]="TouchMod";
 HIDDEN const char tm_str_row[]="Tap To Move";

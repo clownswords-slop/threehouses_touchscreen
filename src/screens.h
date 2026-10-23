@@ -447,7 +447,13 @@ static int extras_tap(u64 g,float x,float y){
       if(vt==0x1a4e660) press(BTN_X);
       press(x<1035.f?BTN_L:BTN_R); tm_log2("movie avatar",(s64)x,(s64)vt); return 1; }
     if(vt==0x1a4e660 && inbox(x,y,1100.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }      // X Change Settings
-    if(vt==0x1a4eb60){ if(x<600.f && y>140.f && y<570.f){ press(BTN_B); retap_later(x,y,15); } return 1; }   // back to the list
+    // back to the list, instant: the list (avatar picker - 0x3b80) gets the tapped row with SetIndex while it hasn't the focus, then
+    // B moves the hand straight onto it (rows 34.67 apart, row 0 centre y 160.3, 11 visible from +0x6a); selected, a second tap plays
+    if(vt==0x1a4eb60){ if(x<600.f && y>140.f && y<570.f){ u64 l=o-0x3b80; if(!is_widget(l,0x1a4e660)){ press(BTN_B); retap_later(x,y,15); return 1; }
+        int r=(int)((y-160.3f)/34.67f+0.5f), top=*(volatile short*)(l+0x6a), n=RDS32(l+0x54), it=top+r; if(r<0||r>=*(volatile short*)(l+0x66)||it<0||it>=n) return 1;
+        if(RDS32(l+0x4c)!=it) ((SetIdxFn)(g_main+0x5de5b0))(l,it);
+        press(BTN_B); dt_arm(l+0x4c,it,0,0); tm_log2("movie list from settings",it,0); }
+      return 1; }
     return 0; }
   if(vt==0x1a4ddf0){
     int playing=RDS32(g+0xa5e50)!=0;

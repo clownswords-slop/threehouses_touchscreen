@@ -252,6 +252,16 @@ static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
+// Drawn cursor pinned on a tile for n polls: SetCursor with snap copies the cell's position (+0x10 x, +0x18 z) into the glide
+// target battle+0x3b30/38 and the drawn position +0x3b50/58; written here every poll (phase 1 only) so a jump + d-pad step shows
+// no movement at all
+static int g_pin_x, g_pin_y, g_pin_n;
+static void cursor_pin(int x,int y){ g_pin_x=x; g_pin_y=y; g_pin_n=20; }
+static void cursor_pin_tick(void){
+  if(g_pin_n<=0) return; g_pin_n--;
+  u64 b=battle(), c=cell_at(g_pin_x,g_pin_y); if(!b||!c||RDS32(b+0x3cc0)!=1){ g_pin_n=0; return; }
+  u64 px=RD64(c+0x10), pz=RD64(c+0x18);
+  *(volatile u64*)(b+0x3b30)=px; *(volatile u64*)(b+0x3b38)=pz; *(volatile u64*)(b+0x3b50)=px; *(volatile u64*)(b+0x3b58)=pz; }
 static void cursor_hide_tick(void){
   u64 b=battle(); if(!b||!g_main) return;
   s32 ph=RDS32(b+0x3cc0);
@@ -1288,9 +1298,9 @@ static void on_tap(float x,float y){
         // the cursor confirms the move (the branch above). Jump next to the target, then take one real d-pad step so the game recomputes the move path
         g_move_hide=0;   // a new destination: the cursor shows again right away (cursor_hide_tick restores it)
         u64 bb=battle(); int minx=RDS32(bb+0x3b18), miny=RDS32(bb+0x3b1c), maxx=RDS32(bb+0x3b20), maxy=RDS32(bb+0x3b24); int done=0;
-        // The jump doesn't snap (SetCursor snap=0 only moves the target, battle+0x3b30/38; the drawn cursor +0x3b50/58 glides there),
-        // and the neighbour is the one on the cursor's side, so the highlight glides once to the destination instead of popping next
-        // to it and then sliding the last tile
+        // The highlight goes straight to the destination: the jump doesn't snap (SetCursor snap=0 only moves the logical cursor and
+        // its glide target battle+0x3b30/38) and cursor_pin_tick keeps the drawn cursor (+0x3b50/58) and the glide target on the
+        // destination while the jump and the step settle, so neither the neighbour nor a glide is ever drawn
         dmap_from_cam(); int bk=-1, bd=1<<30;
         for(int k=0;k<4;k++){ int nx=tx-dmap_dx[k], ny=ty-dmap_dy[k]; if(nx<minx||ny<miny||nx>=maxx||ny>=maxy) continue;
           int dd=(nx-cx)*(nx-cx)+(ny-cy)*(ny-cy); if(dd<bd){ bd=dd; bk=k; } }
@@ -1300,6 +1310,7 @@ static void on_tap(float x,float y){
         // Tap To Move: Instant confirms right away (A once the cursor is there); Instant when safe only on a tile no enemy can
         // reach this turn (map cell +0x27 bit 0, the game's Danger Area, kept up to date whether or not it is shown)
         int instant= g_tap_mode==1 || (g_tap_mode==2 && cell_at(tx,ty) && !(*(volatile u8*)(cell_at(tx,ty)+0x27)&1));
+        if(done) cursor_pin(tx,ty);
         if(!done) chase_start(tx,ty,instant); else if(instant) wait_then_a(tx,ty);
         tm_log2("move target",tx*100+ty,instant);
       }
