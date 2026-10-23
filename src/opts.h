@@ -1,4 +1,4 @@
-// ---- "TouchMod" tab in the Options screen ----
+// ---- "Touchscreen" tab in the Options screen (called TouchMod in the code and notes) ----
 // The Options list (G+0x2250, vtable main+0x1a431f8) shows option IDs per tab: the tab byte is list+0x980 (0 Battle, 1 Monastery,
 // 2 General), the IDs u16 at list+0x84 (count list+0x80), values at list+0x500 + 4*ID (IDs 0..0x21). The tab header object
 // (G+0x60770) has 5 tab slots (G+0x60870 + i*0x88; the message file still has "Sound/Event" / "Other" tab names); Options opens it
@@ -7,7 +7,7 @@
 //   0x5fd5bc  tab 3 gets IDs 0x22 (Tap To Move), 0x23 / 0x24 (Horizontal / Vertical Camera Sensitivity, 0..15 sliders)
 //   0x5fd288 / 0x5fd80c / 0x5fd838 / 0x5fd9a4  per-tab scroll (list+0x974 +
 //             4*tab) for tabs 0..2 only: tab 3 would land on the tab byte itself
-//   0x669928  tab 3's label (GetMessage(0xff)) -> "TouchMod"
+//   0x669928  tab 3's label (GetMessage(0xff)) -> "Touchscreen"
 //   0x5fe7f8  row labels GetMessage(table[ID]) for IDs 0x22..0x24 (ID in x25)
 //   0x5fe784  value text (main+0x5fe4d0): text for 0x22; for 0x23 / 0x24 a gauge like the volume rows (returns 1, min / value / max
 //             through x3 / x4 / x5)                    0x5fe04c  description (main+0x5fe020 returns early for IDs > 0x21)
@@ -26,7 +26,7 @@ static const char* const tap_mode_desc[3]={
   "Tapping a tile with a unit selected confirms movement.",
   "Tapping a tile with a unit selected confirms movement if it would not place the unit in range of an enemy's attack." };
 #define HIDDEN __attribute__((visibility("hidden")))
-HIDDEN const char tm_str_tab[]="TouchMod";
+HIDDEN const char tm_str_tab[]="Touchscreen";
 HIDDEN const char tm_str_row[]="Tap To Move";
 HIDDEN const char tm_str_row2[]="Horizontal Camera Sensitivity";
 HIDDEN const char tm_str_row3[]="Vertical Camera Sensitivity";
