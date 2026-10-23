@@ -250,7 +250,7 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 typedef void (*CurShowFn)(u64 b,int show);
 static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
-static int g_cam_sens=7; // Options -> TouchMod -> Camera Sensitivity 0..15: free-roam camera drag gain (v+1)/8 (opts.h)
+static int g_cam_sens[2]={7,7};   // Options -> TouchMod -> Horizontal / Vertical Camera Sensitivity 0..15: free-roam camera drag gain (v+1)/8 (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
 // Drawn cursor pinned on a tile for n polls: SetCursor with snap copies the cell's position (+0x10 x, +0x18 z) into the glide
@@ -1486,9 +1486,9 @@ static void cam_tick(void){
   if(t_cam==6){ g_rs_x=cam_axis(-cam_vx,1400.f); g_rs_y=cam_axis(cam_vy,1400.f); return; }    // over the shoulder: free turn and tilt
   if(t_cam==2){ g_rs_x=cam_axis(cam_vx,1400.f); g_rs_y=0; }          // model turntable: horizontal only
   else { // free roam: horizontal 18x the finger speed (2x the old 9x), vertical 0.75x of the old response (gain and top deflection),
-    // both times Options -> TouchMod -> Camera Sensitivity ((v+1)/8, 1 by default)
-    float k=(float)(g_cam_sens+1)/8.f;
-    g_rs_x=cam_axis(-cam_vx*18.f*k,2000.f); g_rs_y=(s32)((float)cam_axis(cam_vy*9.f*k,1400.f)*0.75f); }
+    // each times its Options -> TouchMod -> Horizontal / Vertical Camera Sensitivity ((v+1)/8, 1 by default)
+    float kx=(float)(g_cam_sens[0]+1)/8.f, ky=(float)(g_cam_sens[1]+1)/8.f;
+    g_rs_x=cam_axis(-cam_vx*18.f*kx,2000.f); g_rs_y=(s32)((float)cam_axis(cam_vy*9.f*ky,1400.f)*0.75f); }
 }
 static void touch_update(TouchScreenState1*ts){
   u64 now=ticks();
