@@ -115,7 +115,8 @@ static int opt_on_row(void){   // our tab, our row selected, no confirmation (Re
   u64 w=opt_list(); if(!w) return 0; return *(volatile u8*)(w+OPT_TAB_BYTE)==3 && RDS32(w+0x54)==1 && RDS32(w+0x4c)==0
     && !*(volatile u8*)(w+0x981) && !*(volatile u8*)(w+0x982) && !*(volatile u8*)(w+0x983); }
 static void opt_set(int v){ if(v<0) v=2; if(v>2) v=0; if(v==g_tap_mode) return; g_tap_mode=v; settings_save();
-  u64 w=opt_list(); u64 g=cmn_ui(); if(w&&g){ tm_opt_desc(); u64 d=g+0x2cf8; ((void(*)(u64,int,int))RD64(RD64(d)+0x78))(d,1,1); } }   // redraw the description
+  u64 w=opt_list(); u64 g=cmn_ui(); if(w&&g){ tm_opt_desc(); u64 d=g+0x2cf8; ((void(*)(u64,int,int))RD64(RD64(d)+0x78))(d,1,1);   // redraw the description
+    ((void(*)(u64))RD64(RD64(w)+0x180))(w); } }   // the option-change sound, as the game after a value change (list vfunc 0x180: if list+0x60, main+0x570100 = SE 0x1b2)
 // Tab header: 4 tabs centred like the game's 3 (layout x = screen x - 960, y = 540 - 196); each tab element is
 // *( *(G+0x60870+i*0x88) + 0x18 ), position +0x30/+0x34, flags +0x58 (bit 4 = position changed)
 static const float opt_tab_x[4]={ 690.f, 870.f, 1050.f, 1230.f };
