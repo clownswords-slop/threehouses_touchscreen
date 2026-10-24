@@ -697,6 +697,17 @@ static int convoy_tap(u64 g,float x,float y){
 static int opts_tabs4(void); static int opts_our_row(int it); static void opts_tap_value(int it,float x);
 #define OP_LIST 0x2250   // vtable main+0x1a431f8; +0x4c idx, +0x54 cnt, u16 at +0x6a = first visible row
 #define OP_TAB  0x2bd0   // 0 Battle, 1 Monastery, 2 General (ZL/ZR)
+// Per-tab scroll (first visible row) at list+0x974 + 4*tab: on ZL / ZR the game first saves the list's +0x6a into the slot of the
+// CURRENT tab byte (main+0x5fd274), then switches and restores the new tab's. The instant tab tap sets the byte to the target's
+// neighbour first, so the shown tab's scroll used to be saved under that neighbour (Battle scrolled 7 rows down, tap Touchscreen ->
+// General later opened 7 rows down: blank rows (ID 0xffff = message 0, "L") past its 12, off the window, broken scrollbar).
+// The tap now saves the shown tab's scroll itself, and op_fix_tick puts the neighbour's back once the switch has happened.
+// (Tab 3, ours, has no slot: list+0x980 is the tab byte itself.)
+static int op_fix_mid=-1, op_fix_k, op_fix_n; static s32 op_fix_val;
+static void op_fix_tick(void){ if(op_fix_mid<0) return; u64 g=cmn_ui();
+  if(!g || !is_widget(g+OP_LIST,0x1a431f8) || --op_fix_n<=0){ op_fix_mid=-1; return; }
+  if(*(volatile u8*)(g+OP_TAB)!=op_fix_k) return;
+  *(volatile s32*)(g+OP_LIST+0x974+4*op_fix_mid)=op_fix_val; op_fix_mid=-1; }
 static int options_tap(u64 g,float x,float y){
   u64 w=g+OP_LIST; if(!is_widget(w,0x1a431f8)) return 0;
   s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54), tab=RDS32(g+OP_TAB); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
@@ -706,9 +717,12 @@ static int options_tap(u64 g,float x,float y){
     int k=-1; if(x>=290.f&&x<=380.f) k=tab-1; else if(x>=900.f&&x<=1000.f) k=tab+1;
     else if(nt==4 && x>=400.f&&x<=880.f) k=(int)((x-460.f)/120.f+0.5f); else if(nt==3 && x>=455.f&&x<=820.f) k=(int)((x-519.f)/120.f+0.5f);
     if(k<0||k>=nt||tab>=nt) return 1;
-    if(k==tab) return 1;
+    if(k==tab || op_fix_mid>=0) return 1;   // (a switch still pending: wait for it)
     // instant: put the tab next to the target, one real ZL/ZR step loads it (as with the convoy tabs)
-    *(volatile u8*)(g+OP_TAB)= (u8)(k>tab ? k-1 : k+1); q_push(k>tab?BTN_ZR:BTN_ZL,2,4);
+    int mid= k>tab ? k-1 : k+1;
+    if(mid!=tab){ if(tab<3) *(volatile s32*)(w+0x974+4*tab)=(s32)*(volatile short*)(w+0x6a);   // the shown tab's scroll, as a normal switch saves it
+      if(mid<3){ op_fix_mid=mid; op_fix_k=k; op_fix_val=RDS32(w+0x974+4*mid); op_fix_n=60; } }
+    *(volatile u8*)(g+OP_TAB)=(u8)mid; q_push(k>tab?BTN_ZR:BTN_ZL,2,4);
     tm_log2("options tab",k,tab); return 1; }
   if(x>=300.f&&x<=975.f&&y>=185.f&&y<=556.f){
     int top=(int)((RD32(w+0x68)>>16)&0xffff); if(top<0||top>=cnt) top=0;

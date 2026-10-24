@@ -153,6 +153,7 @@ static u64 g_opt_mask, g_opt_prev; static int g_opt_hold, g_opt_row;
 static int g_settings_loaded;
 static void opts_tick(void){
   if(!g_settings_loaded){ g_settings_loaded=1; settings_load(); }
+  op_fix_tick();
   opts_install();
   if(g_opts_state!=1){ g_opt_mask=0; return; }
   opt_header_tick();
