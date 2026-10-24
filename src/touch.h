@@ -250,7 +250,7 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 typedef void (*CurShowFn)(u64 b,int show);
 static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
-static int g_cam_sens[2]={7,7};   // Options -> TouchMod -> Horizontal / Vertical Camera Sensitivity 0..15: free-roam camera drag gain (v+1)/8 (opts.h)
+static int g_cam_sens[2]={7,7};   // Options -> TouchMod -> Horizontal / Vertical Camera Sensitivity 0..15: free-roam camera drag gain fr_gain(v) (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
 // Drawn cursor pinned on a tile for n polls: SetCursor with snap copies the cell's position (+0x10 x, +0x18 z) into the glide
@@ -1465,7 +1465,7 @@ static void drag_cursor_tick(void){
     if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,1); return; } }
   set_cursor_instant(tx,ty); }
 // Free-roam camera (t_cam 1): the camera follows the finger while it moves (across: -dx * 0.003 rad / px, up / down: -dy * 0.0045
-// rad / px, each times Options -> Touchscreen -> Horizontal / Vertical Camera Sensitivity (v+1)/8) and stops when it stops or lifts.
+// rad / px, each times Options -> Touchscreen -> Horizontal / Vertical Camera Sensitivity, fr_gain) and stops when it stops or lifts.
 // The game's controller *(main+0x1afb3a0) (update main+0x1cbc80) keeps a yaw target in degrees at +0x32c and a pitch target 0..1
 // at +0x34c (60 deg per unit; 0.125..0.875 at rest = the +-0.3927 rad limits); the right stick only adds to them (2 deg / 0.04 a
 // full poll at the default Camera Rotation Speed, the game's top speed) and each is eased in (smoothers at +0x310 / +0x330: start
@@ -1489,8 +1489,11 @@ static u64 fr_ctrl(void){ u64 c=RD64(g_main+FR_CTRL); if(!c || !mem_ok(c) || !me
   float p=RDF(c+0x34c), t=RDF(c+0x32c); if(!(p>=0.f && p<=1.f) || !(t>-100000.f && t<100000.f)) return 0; return c; }
 static int fr_invert(void){ u64 st=RD64(g_main+0x1b12190); if(!st || !mem_ok(st+0x231d0)) return -1;
   return (*(volatile u8*)(st+0x231cd+3)==1 ? 1 : 0) | (*(volatile u8*)(st+0x231cd+2)==1 ? 2 : 0); }
+// slider gain: (v+1)/8 up to the default 7 (1x), then half as steep, so the top value 15 is 1.5x (the user asked for a quarter
+// off the 2x top)
+static float fr_gain(int v){ return v<=7 ? (float)(v+1)/8.f : 1.f+(float)(v-7)/16.f; }
 static void fr_follow(float dx,float dy){
-  float kx=(float)(g_cam_sens[0]+1)/8.f, ky=(float)(g_cam_sens[1]+1)/8.f;
+  float kx=fr_gain(g_cam_sens[0]), ky=fr_gain(g_cam_sens[1]);
   float tyaw=-dx*0.003f*kx, tpit=-dy*0.0045f*ky;   // the turn this poll, rad
   g_rs_x=0; g_rs_y=0;
   u64 c=fr_ctrl(); int inv=fr_invert();
