@@ -1464,24 +1464,53 @@ static void drag_cursor_tick(void){
     if(nx==cx&&ny==cy){ q_push(dbtn[k],1,1); return; }
     if(set_cursor_instant(nx,ny)){ q_push(0,1,0); q_push(dbtn[k],1,1); return; } }
   set_cursor_instant(tx,ty); }
-// Free-roam camera (t_cam 1): the camera follows the finger while it moves, at a rate set by Options -> Touchscreen -> Horizontal /
-// Vertical Camera Sensitivity. Every poll the finger's movement owes a turn (across: -dx * 0.003 rad / px, up / down: -dy *
-// 0.0045 rad / px, each times (v+1)/8); a full right-stick poll turns this camera exactly 0.0349 rad (2 deg) across or 0.0419 rad
-// (2.4 deg) up / down (measured: linear; partial deflections are slow and nonlinear), so a full push is given whenever at least half
-// a step is owed and the step is paid off: slow drags give spaced pushes, fast ones a push every poll (the camera's top speed).
-// The balance is capped at two steps, so the camera can't fall behind the finger; when the finger stops it stops within two polls,
-// and when it lifts the balance is dropped (no turning afterwards). (Driving the stick from the finger speed, before, saturated it
-// on any drag, so the sensitivity changed nothing.) +x stick turns the yaw up, +y lowers the pitch.
+// Free-roam camera (t_cam 1): the camera follows the finger while it moves (across: -dx * 0.003 rad / px, up / down: -dy * 0.0045
+// rad / px, each times Options -> Touchscreen -> Horizontal / Vertical Camera Sensitivity (v+1)/8) and stops when it stops or lifts.
+// The game's controller *(main+0x1afb3a0) (update main+0x1cbc80) keeps a yaw target in degrees at +0x32c and a pitch target 0..1
+// at +0x34c (60 deg per unit; 0.125..0.875 at rest = the +-0.3927 rad limits); the right stick only adds to them (2 deg / 0.04 a
+// full poll at the default Camera Rotation Speed, the game's top speed) and each is eased in (smoothers at +0x310 / +0x330: start
+// +0x18, target +0x1c, duration / elapsed +8 / +0xc). The drag writes the targets directly with the easing finished, as the game's
+// own snap does (main+0x1cbf58), so there is no top speed and no swing past. Which way a target moves for a turn depends on the
+// game's invert options and stick axes, so it is learned: until then that axis uses full right-stick pushes (a push whenever half a
+// step is owed, the balance capped at two steps) and the target's change after a push gives the sign. Relearned when the invert
+// options (settings *(main+0x1b12190) + 0x231cd + 3 / + 2) change.
 #define FR_YAW_STEP 0.0349f
 #define FR_PIT_STEP 0.0419f
+#define FR_CTRL 0x1afb3a0
+#define FR_SMOOTH_VT 0x1a0f200
 static float fr_yaw_owed, fr_pit_owed;
+static int fr_sx, fr_sy;            // learned: target change for a turn up (yaw) / a tilt up (pitch): +-1, 0 = not yet
+static int fr_inv=-1;               // invert options when learned
+static float fr_lt, fr_lp; static s32 fr_lpx, fr_lpy; static int fr_lvalid;   // targets and pushes at the last poll
 static float fr_cap(float v,float m){ return v>m ? m : v<-m ? -m : v; }
+static float fr_abs(float v){ return v<0.f ? -v : v; }
+static u64 fr_ctrl(void){ u64 c=RD64(g_main+FR_CTRL); if(!c || !mem_ok(c) || !mem_ok(c+0x350)) return 0;
+  if(RD64(c+0x310)!=g_main+FR_SMOOTH_VT || RD64(c+0x330)!=g_main+FR_SMOOTH_VT) return 0;
+  float p=RDF(c+0x34c), t=RDF(c+0x32c); if(!(p>=0.f && p<=1.f) || !(t>-100000.f && t<100000.f)) return 0; return c; }
+static int fr_invert(void){ u64 st=RD64(g_main+0x1b12190); if(!st || !mem_ok(st+0x231d0)) return -1;
+  return (*(volatile u8*)(st+0x231cd+3)==1 ? 1 : 0) | (*(volatile u8*)(st+0x231cd+2)==1 ? 2 : 0); }
 static void fr_follow(float dx,float dy){
   float kx=(float)(g_cam_sens[0]+1)/8.f, ky=(float)(g_cam_sens[1]+1)/8.f;
-  fr_yaw_owed=fr_cap(fr_yaw_owed-dx*0.003f*kx, 2.f*FR_YAW_STEP); fr_pit_owed=fr_cap(fr_pit_owed-dy*0.0045f*ky, 2.f*FR_PIT_STEP);
+  float tyaw=-dx*0.003f*kx, tpit=-dy*0.0045f*ky;   // the turn this poll, rad
   g_rs_x=0; g_rs_y=0;
-  if(fr_yaw_owed>=FR_YAW_STEP*0.5f){ g_rs_x=32767; fr_yaw_owed-=FR_YAW_STEP; } else if(fr_yaw_owed<=-FR_YAW_STEP*0.5f){ g_rs_x=-32767; fr_yaw_owed+=FR_YAW_STEP; }
-  if(fr_pit_owed>=FR_PIT_STEP*0.5f){ g_rs_y=-32767; fr_pit_owed-=FR_PIT_STEP; } else if(fr_pit_owed<=-FR_PIT_STEP*0.5f){ g_rs_y=32767; fr_pit_owed+=FR_PIT_STEP; } }
+  u64 c=fr_ctrl(); int inv=fr_invert();
+  if(c && inv!=fr_inv){ fr_inv=inv; fr_sx=fr_sy=0; }
+  if(c){ float t=RDF(c+0x32c), p=RDF(c+0x34c);
+    if(fr_lvalid){   // learn from the last poll's push
+      float d=t-fr_lt; while(d>180.f) d-=360.f; while(d<-180.f) d+=360.f;
+      if(!fr_sx && fr_lpx && fr_abs(d)>1.f && fr_abs(d)<3.5f) fr_sx= (d>0.f)==(fr_lpx>0) ? 1 : -1;
+      d=p-fr_lp; if(!fr_sy && fr_lpy && fr_abs(d)>0.01f && fr_abs(d)<0.08f) fr_sy= (d>0.f)==(fr_lpy<0) ? 1 : -1; }
+    if(fr_sx && tyaw!=0.f){ t+=(float)fr_sx*tyaw*57.29578f; while(t>=360.f) t-=360.f; while(t<0.f) t+=360.f;
+      *(volatile float*)(c+0x328)=t; *(volatile float*)(c+0x32c)=t; *(volatile u64*)(c+0x318)=0; }
+    if(fr_sy && tpit!=0.f){ p+=(float)fr_sy*tpit/1.0471976f; if(p<0.125f) p=0.125f; if(p>0.875f) p=0.875f;
+      *(volatile float*)(c+0x348)=p; *(volatile float*)(c+0x34c)=p; *(volatile u64*)(c+0x338)=0; }
+    fr_lt=t; fr_lp=p; fr_lvalid=1; }
+  else { fr_lvalid=0; }
+  if(!c || !fr_sx){ fr_yaw_owed=fr_cap(fr_yaw_owed+tyaw, 2.f*FR_YAW_STEP);
+    if(fr_yaw_owed>=FR_YAW_STEP*0.5f){ g_rs_x=32767; fr_yaw_owed-=FR_YAW_STEP; } else if(fr_yaw_owed<=-FR_YAW_STEP*0.5f){ g_rs_x=-32767; fr_yaw_owed+=FR_YAW_STEP; } }
+  if(!c || !fr_sy){ fr_pit_owed=fr_cap(fr_pit_owed+tpit, 2.f*FR_PIT_STEP);
+    if(fr_pit_owed>=FR_PIT_STEP*0.5f){ g_rs_y=-32767; fr_pit_owed-=FR_PIT_STEP; } else if(fr_pit_owed<=-FR_PIT_STEP*0.5f){ g_rs_y=32767; fr_pit_owed+=FR_PIT_STEP; } }
+  fr_lpx=g_rs_x; fr_lpy=g_rs_y; }
 static s32 cam_axis(float v,float gain){ float a=v<0?-v:v; if(a<0.25f) return 0; float o=7000.f+a*gain; if(o>32767.f) o=32767.f; return (s32)(v<0?-o:o); }
 static void cam_tick(void){
   if(!t_down||!t_cam||t_settle>0){ g_rs_x=g_rs_y=0; cam_vx=cam_vy=0.f; return; }
@@ -1510,7 +1539,7 @@ static void touch_update(TouchScreenState1*ts){
   if(ts->count>0){
     float x=(float)ts->t[0].x, y=(float)ts->t[0].y;
     if(!t_down){ g_touch_mode=1; t_down=1; t_settle=2; t_p0=g_poll; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; t_t0=now; t_long=0; t_swiped=0;
-      t_cam=cam_screen(); if(t_cam==1) fr_yaw_owed=fr_pit_owed=0.f; if(t_cam==4){ cam_sp0=cam_sinpitch(); cam_steps=0; cam_push=0; cam_cool=0; } dc_x=dc_y=-1; cam_freeze(0); cam_lx=x; cam_ly=y; cam_vx=cam_vy=0.f; cam_dist=0.f; return; }
+      t_cam=cam_screen(); if(t_cam==1){ fr_yaw_owed=fr_pit_owed=0.f; fr_lvalid=0; } if(t_cam==4){ cam_sp0=cam_sinpitch(); cam_steps=0; cam_push=0; cam_cool=0; } dc_x=dc_y=-1; cam_freeze(0); cam_lx=x; cam_ly=y; cam_vx=cam_vy=0.f; cam_dist=0.f; return; }
     if(t_settle>0){ t_settle--; t_x0=t_x=t_sx=x; t_y0=t_y=t_sy=y; cam_lx=x; cam_ly=y; return; }
     // A finger / mouse dragged off the screen is still held but reported at (0, 0): keep the last real position (it read as a long
     // drag back up and left: the battle camera turned the other way and tilted)
