@@ -19,7 +19,7 @@
 #define DESC_OFF 0x5fe020
 
 #define CAM_SENS_MAX 15
-#define CAM_SENS_DEF 7                 // camera drag gain (fr_gain, touch.h): 7 = the speed before the option existed (g_cam_sens[], touch.h)
+#define CAM_SENS_DEF 7                 // camera drag gain (fr_gain, touch.h): 15 = 1.5x the speed before the option existed (g_cam_sens[], touch.h)
 static const char* const tap_mode_name[3]={ "Normal", "Instant", "Instant when safe" };
 static const char* const tap_mode_desc[3]={
   "Tapping a tile with a unit selected does not confirm movement.",

@@ -1489,9 +1489,8 @@ static u64 fr_ctrl(void){ u64 c=RD64(g_main+FR_CTRL); if(!c || !mem_ok(c) || !me
   float p=RDF(c+0x34c), t=RDF(c+0x32c); if(!(p>=0.f && p<=1.f) || !(t>-100000.f && t<100000.f)) return 0; return c; }
 static int fr_invert(void){ u64 st=RD64(g_main+0x1b12190); if(!st || !mem_ok(st+0x231d0)) return -1;
   return (*(volatile u8*)(st+0x231cd+3)==1 ? 1 : 0) | (*(volatile u8*)(st+0x231cd+2)==1 ? 2 : 0); }
-// slider gain: (v+1)/8 up to the default 7 (1x), then half as steep, so the top value 15 is 1.5x (the user asked for a quarter
-// off the 2x top)
-static float fr_gain(int v){ return v<=7 ? (float)(v+1)/8.f : 1.f+(float)(v-7)/16.f; }
+// slider gain: linear, 1.5 * (v+1)/16: the top value 15 is 1.5x the old speed (a quarter off the earlier 2x top), the default 7 is 0.75x
+static float fr_gain(int v){ return 1.5f*(float)(v+1)/16.f; }
 static void fr_follow(float dx,float dy){
   float kx=fr_gain(g_cam_sens[0]), ky=fr_gain(g_cam_sens[1]);
   float tyaw=-dx*0.003f*kx, tpit=-dy*0.0045f*ky;   // the turn this poll, rad
