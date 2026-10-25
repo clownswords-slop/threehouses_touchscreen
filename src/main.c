@@ -188,7 +188,7 @@ static void process_(NpadState*s,u32 id,u64 lr){
       for(int i=n-1;i>=0;i--){ if(tsh[i].sampling>last_samp){ last_samp=tsh[i].sampling; PF(1, touch_update(&tsh[i])); } } }
     else { GetTouch1(&ts); PF(1, touch_update(&ts)); })
     PF(2, chase_tick(); tcycle_tick());
-    PF(3, rt_tick());
+    PF(3, rt_tick(); ab_tick());
     PF(4, hc_tick());
     PF(5, prep_tick());
     PF(6, cursor_hide_tick(); cursor_pin_tick());

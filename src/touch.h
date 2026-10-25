@@ -900,41 +900,72 @@ static const HandProf hprof[]={
   {0x1a3fdc8, -1.9f, 34.7f,  -20.f, 310.f, 1, 1, "guide"},    // Guide: categories
   {0x1a3ff88, -1.9f, 34.7f,  -20.f, 310.f, 1, 1, "guide2"},   // Guide: topics
 };
-// Abilities / Combat Arts screens (Inventory): the hand owner (vtable 0x1a40300 / 0x1a40498) holds the left-hand list
-// at +0x758 (vtable 0x1a42108, a normal list: idx +0x4c, cnt +0x54), so rows are selected instantly with list_jump.
-// Abilities has 9 rows in sections (Personal 1, Class 3, Equipped 5) with gaps between the sections; Combat Arts has
-// evenly spaced rows. Row centre = hand y; offsets measured from the hand's y on each row.
+// Abilities / Combat Arts / Battalions screens (Inventory): the hand owner (vtable 0x1a40300 / 0x1a40498 / 0x1a40630) holds the
+// left-hand list at +0x758 (vtable 0x1a42108, a normal list: idx +0x4c, cnt +0x54) and the right-hand one at +0xdb0 (Abilities /
+// Combat Arts "Available": vt 0x1a41400; Battalions "Barracks": vt 0x1a41770, wider rows, L/R unit arrows, X Sort). The focused list
+// has +8 bits 0x0c (0x3c / 0x30). Right moves the hand into the right list (always onto its first row: the game resets the index),
+// Left moves it back (B there leaves the screen).
+// Left rows (hand y relative to row 0): Abilities has 9 rows in sections (Personal 1, Class 3, Equipped 5) with gaps; Combat Arts
+// has 3 slots 34.65 apart, plus "Personal Combat Art" under its own header (4 rows: Byleth and others who have one) 156 below row 0.
 static const float abil_y[9]={0.f,53.4f,88.f,122.7f,176.7f,211.4f,246.f,280.7f,315.4f};
-// The right-hand "Available" list is at owner+0xdb0 (vtable 0x1a41400): rows 35.05 apart, row centre = hand y - 1,
-// spanning x 723-1093 (hand x 735) with the first row at y 161.6. A on an equipped slot moves the hand there.
+static float ab_rowoff(int abil,int arts,s32 cnt,int i){
+  if(abil && cnt==9) return abil_y[i];
+  if(arts && cnt==4 && i==3) return 156.f;
+  return 34.65f*(float)i; }
+// Right rows with the hand on the left: hand y of the first visible row and the pitch (measured): Available Abilities 162.6 / 35.05,
+// Available Combat Arts (column headers above) 201.3 / 34.7, Barracks 176 / 34.67.
+static void ab_right_geo(int abil,int batt,float*y0,float*p){ *y0= abil ? 162.6f : batt ? 176.f : 201.3f; *p= abil ? 35.05f : 34.7f; }
+// Taps across the two lists: Right (or Left) and, the poll the other list takes the focus, its selection is put on the tapped row
+// (SetIndex next to it + one real step, as list_jump), so the hand goes straight there; the row is armed and the next tap confirms.
+// (Before: Right / B, then the tap replayed once the hand had arrived; B in the right list leaves the whole screen (back to the unit
+// picker), and a tap on the first Available row assigned it at once.) The left rows' position is kept by ab_tick
+// while the hand is there (the row-0 hand y), for taps from the right.
+static u64 ab_x_w; static int ab_x_it, ab_x_n;
+static u64 ab_own; static float ab_l_hy0;
+static void ab_tick(void){
+  if(ab_x_w){ if(--ab_x_n<=0 || !mem_ok(ab_x_w)) ab_x_w=0;
+    else if((*(volatile u8*)(ab_x_w+8)&0x0c)==0x0c){ u64 w=ab_x_w; ab_x_w=0; s32 cnt=RDS32(w+0x54);
+      if(ab_x_it>=0 && ab_x_it<cnt){ if(RDS32(w+0x4c)!=ab_x_it) list_jump(w,ab_x_it,0); dt_arm(w+0x4c,ab_x_it,0,0); } } }
+  u64 g=cmn_ui(); if(!g || !hand_on(g)) return; u64 o=RD64(g+G_HAND_OWNER); if(!mem_ok(o)) return; u64 vt=RD64(o)-g_main;
+  if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return;
+  u64 l=o+0x758; if(!is_widget(l,0x1a42108) || (*(volatile u8*)(l+8)&0x0c)!=0x0c) return;
+  float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f; if(hx>400.f) return;
+  s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return;
+  ab_own=o; ab_l_hy0=hy-ab_rowoff(vt==0x1a40300,vt==0x1a40498,cnt,idx); }
 static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return 0;
-  int batt= vt==0x1a40630;   // Battalions: same layout, the right list is the Barracks (vt 0x1a41770, wider rows), L/R unit arrows, X Sort
+  int batt= vt==0x1a40630, abil= vt==0x1a40300, arts= vt==0x1a40498;
   if(batt){ if(y>=88.f&&y<=128.f){ if(x>=35.f&&x<=120.f){ press(BTN_LB); return 1; } if(x>=380.f&&x<=470.f){ press(BTN_RB); return 1; } }
     if(inbox(x,y,960.f,1250.f,42.f,82.f)){ press(BTN_X); return 1; } }
   if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("abilities details",0,0); return 1; }   // "X Details" in the corner
   u64 l=o+0x758, r=o+0xdb0; if(!is_widget(l,0x1a42108)) return 1;
-  int abil= vt==0x1a40300;
   s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
   int rok=is_widget(r,batt?0x1a41770:0x1a41400); s32 ridx= rok? RDS32(r+0x4c) : -1, rcnt= rok? RDS32(r+0x54) : 0;
   float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f;
-  if(hx>400.f){                                  // the hand is in the Available list
-    if(x<560.f){ if(rt_depth==0){ q_push(BTN_B,2,3); retap_later(x,y,20); } return 1; } // tap on the left list: back there first
+  if(ab_x_w) return 1;                           // a switch to the other list is on its way
+  if(hx>400.f){                                  // the hand is in the right list
+    if(x<(batt?520.f:560.f)){                   // a tap on the left list: Left, then that row the moment the left list has the focus
+      int best=-1;
+      if(ab_own==o){ float bd=1e9f; for(int i=0;i<cnt;i++){ float d=y-(ab_l_hy0+ab_rowoff(abil,arts,cnt,i)); if(d<0.f) d=-d; if(d<bd){ bd=d; best=i; } } if(bd>18.f) best=-1; }
+      if(x<30.f || y<120.f || y>640.f) return 1;
+      press(BTN_L); if(best>=0){ ab_x_w=l; ab_x_it=best; ab_x_n=60; }
+      tm_log2("to equipped",best,(s64)y); return 1; }
     if(!rok || rcnt<=0 || rcnt>200 || ridx<0 || ridx>=rcnt) return 1;
     if(x<hx-15.f || x>hx+(batt?680.f:360.f)) return 1;
     float f=(y-(hy-1.f))/35.05f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int it=ridx+d;
     if(it<0||it>=rcnt) return 1;
     list_pick(r,it);   // double tap to assign (the selected row: one tap)
     tm_log2(abil?"avail abilities":"avail arts",it,ridx); return 1; }
-  // A tap on the Available list while the left list has the hand: Right moves the hand there (A on a filled slot would open
-  // Unequip / Trade instead; entering the list always starts on its first row), and the tap is replayed on the list the moment the
-  // hand has moved over (it selects the tapped row with SetIndex + one step).
-  if(x>=700.f && rok && rcnt>0){ if(rt_depth==0){ q_push(BTN_R,2,3); retap_later(x,y,30); rt_hxmin=400.f; tm_log2("to available",(s64)x,(s64)y); } return 1; }
+  // A tap on the right list while the left one has the hand: Right (A on a filled slot would open Unequip / Trade instead), and the
+  // tapped row is selected the moment the right list has the focus (armed: the next tap confirms).
+  if(x>=(batt?540.f:700.f) && rok && rcnt>0 && rcnt<=200){
+    float y0,p; ab_right_geo(abil,batt,&y0,&p); int top=(s32)(short)(RD32(r+0x68)>>16);
+    float f=(y-y0)/p; int it=top+(int)(f+(f>=0?0.5f:-0.5f)); if(y<y0-p*0.5f || it<0 || it>=rcnt) return 1;
+    q_push(BTN_R,2,3); ab_x_w=r; ab_x_it=it; ab_x_n=60; tm_log2("to available",it,top); return 1; }
   if(x<hx-25.f || x>hx+360.f) return 1;          // rows span x 171-541 with the hand at 187
-  int tab= abil && cnt==9;
-  float base= tab? abil_y[idx] : 34.65f*(float)idx;
+  float base=ab_rowoff(abil,arts,cnt,idx);
   int best=-1; float bd=1e9f;
-  for(int i=0;i<cnt;i++){ float ry=hy+(tab? abil_y[i] : 34.65f*(float)i)-base; float d=y-ry; if(d<0.f) d=-d; if(d<bd){ bd=d; best=i; } }
+  for(int i=0;i<cnt;i++){ float ry=hy+ab_rowoff(abil,arts,cnt,i)-base; float d=y-ry; if(d<0.f) d=-d; if(d<bd){ bd=d; best=i; } }
   if(best<0 || bd>18.f) return 1;                // between sections or outside the list
   list_pick(l,best); tm_log2(abil?"abilities":"arts",best,idx); return 1; }   // double tap (the selected row: one tap)
 // command menus among the generic lists: one tap confirms (everything else is an item / unit list: double tap)

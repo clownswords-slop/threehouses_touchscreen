@@ -58,7 +58,7 @@ static int calendar_tap(u64 g,float x,float y){
         *(volatile s32*)(C+0x4bf8)=2; ((void(*)(u64))(g_main+0x304cb0))(C);
         s32 d=RDS32(dl+0x88); g_learn_hold=20;
         if(t!=d){ if(t>1){ *(volatile s32*)(dl+0x88)=t-1; press(BTN_R); } else { *(volatile s32*)(dl+0x88)=2; press(BTN_L); } }
-        tm_log2("calendar day instant",t,d); return 1; }
+        dt_arm(dl+0x88,t,0,0); tm_log2("calendar day instant",t,d); return 1; }
       if(rt_depth==0){ press(BTN_B); retap_later(x,y,20); } return 1; }   // layout not known yet: back to the days, then the tap
     s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=1||cnt>40||idx<0||idx>=cnt) return 1;
     if(x<35.f||x>520.f) return 1;
@@ -88,10 +88,12 @@ static int calendar_tap(u64 g,float x,float y){
   float top=hy-17.4f-66.67f*(float)rs;                    // top of the first row
   int c=cal_col_at(x); if(c<0||y<top) return 1;
   int r=(int)((y-top)/66.67f); int t=r*7+c-fw+1; if(t<1||t>nd) return 1;
-  if(t==d){ press(BTN_A); return 1; }
+  // a day: the first tap only selects it (also the day that is already selected, e.g. right after the calendar opened: the events
+  // panel on the left is tappable anyway), a second tap on it confirms (A: the day's popup)
+  if(t==d){ if(dt_same(o+0x88,t,0,0)){ dt_on=0; press(BTN_A); } else dt_arm(o+0x88,t,0,0); tm_log2("calendar day same",t,0); return 1; }
   g_learn_hold=20;
   if(t>1){ *(volatile s32*)(o+0x88)=t-1; press(BTN_R); } else { *(volatile s32*)(o+0x88)=2; press(BTN_L); }
-  tm_log2("calendar day",t,d); return 1; }
+  dt_arm(o+0x88,t,0,0); tm_log2("calendar day",t,d); return 1; }
 
 // ---- Roster (book -> Roster): card wheel, hand owner vt 0x1a09260; index owner+0x9c, unit count owner+0x190 ----
 // Up/Down arrows above/below the centre card, the cards stacked above (previous units) and below (next units), centre = A.
@@ -403,6 +405,16 @@ static int prep_tap(u64 g,float x,float y){
   *(volatile s32*)(o+0x8c)=t; *(volatile s32*)(o+0x88)=1; pw_t=t; pw_n=90;
   tm_log2("prep wheel",t,cur); return 1; }
 
+// ---- Advice box (cathedral Counselor: "Would you like to read a note from the advice box?" -> Yes): the note with three timed
+// answers is a list inside the monastery UI object M = *(main+0x1afb448) at M+0x301d0 (vt 0x1a1bca8; idx +0x4c, cnt +0x54; byte +0x21 =
+// shown, 0 once answered). The common hand owner G+0x58 is a hidden widget meanwhile, so the generic lists never got the taps. Answer
+// rows (720p): middles 456.3 / 519 / 581.6, x 339-945. A tap selects a row, a second tap on it answers (the selected one: one tap).
+static int advice_tap(u64 g,float x,float y){
+  (void)g; u64 m=RD64(g_main+0x1afb448); if(!mem_ok(m)) return 0; u64 w=m+0x301d0; if(!is_widget(w,0x1a1bca8)) return 0;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<1||cnt>3||idx<0||idx>=cnt) return 1;
+  if(x<339.f||x>945.f) return 1;
+  float f=(y-456.3f)/62.7f; if(f<-0.5f) return 1; int r=(int)(f+0.5f); if(r>=cnt) return 1;
+  list_pick(w,r); tm_log2("advice",r,idx); return 1; }
 // ---- Library books (free roam): the reader is a list widget inside the monastery UI object M = *(main+0x1afb448),
 // at M+0x8fdd0 (vt 0x1a22530; page +0x50, pages +0x54). Page arrows under the text, "B Close" prompt; other taps do nothing.
 // (The free-roam HUD stays visible underneath, so without this the corner prompts would get the taps.)
@@ -496,7 +508,8 @@ static int sell_dialog_tap(u64 g,float x,float y){
   if(inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_A); return 1; }   // "A Confirm" in the corner
   if(y>=420.f&&y<=475.f&&x>=385.f&&x<=890.f){ int c= x<640.f ? 0 : 1;
     s32 cur=RDS32(w+0x50);
-    if(!foc){ if(rt_depth==0){ q_push(BTN_D,2,1); retap_on_change(x,y,20); tm_log2("sell dialog down",c,cur); } return 1; }   // focus on the quantity: down, then the tap again the moment the buttons take the hand
+    // focus on the quantity: A there moves the focus to Sell (a second A right away sells), B closes the dialog (= Cancel)
+    if(!foc){ if(c==0){ q_push(BTN_A,2,3); q_push(BTN_A,2,3); } else press(BTN_B); tm_log2("sell dialog instant",c,cur); return 1; }
     if(c!=cur) set_col(w,c); press(BTN_A); tm_log2("sell dialog",c,cur); return 1; }
   if(y>=275.f&&y<=330.f&&x>=690.f&&x<=900.f){ int r= x>=790.f;
     if(foc) q_push(BTN_U,2,2);                       // buttons have the focus: up to the quantity, then the arrow in the same go
@@ -530,7 +543,7 @@ static int guild_tap(u64 g,float x,float y){
 static int screens_tap(u64 g,float x,float y){
   if(sell_dialog_tap(g,x,y)) return 1;
   if(extras_tap(g,x,y) || dlc_tap(g,x,y)) return 1;
-  if(prep_tap(g,x,y) || book_tap(g,x,y) || results_tap(g,x,y) || calanim_tap(g,x,y) || house_tap(g,x,y)) return 1;
+  if(prep_tap(g,x,y) || book_tap(g,x,y) || advice_tap(g,x,y) || results_tap(g,x,y) || calanim_tap(g,x,y) || house_tap(g,x,y)) return 1;
   if(guild_tap(g,x,y)) return 1;
   if(bdetail_tap(g,x,y) || calendar_tap(g,x,y) || roster_tap(g,x,y) || status_tap(g,x,y) || quest_detail_tap(g,x,y) || header_tap(g,x,y)) return 1;
   if(appearance_screen(g)){ if(prompt_tap(x,y,appear_prompts,NP(appear_prompts))) return 1; if(!hand_on(g)) return 1; }  // swap display: other taps do nothing
