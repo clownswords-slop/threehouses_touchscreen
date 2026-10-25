@@ -820,6 +820,7 @@ static const Seed seeds[]={
   {0x1a1a4d0, 53.33f, 0.f},         // monastery map -> X Locate: People / Facilities list
   {0x1a22378, 34.67f, 0.f, 3.5f},   // pause menu -> Quests: quest list (hand 3.5 px above a row's middle)
   {0x1a483c8, 33.3f, 0.f, 3.2f},    // Storehouse: Sell / Cancel popup
+  {0x1a45588, 34.67f, 0.f},         // battle: item gained with a full inventory ("Select an item to send to the convoy"; G+0x4ef80)
   {0x1a44a48, 34.67f, 0.f, 11.8f},  // calendar -> Battle: Battlefield mission list (hand 11.8 px above a row's middle)
   {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
@@ -1070,6 +1071,9 @@ static int hand_list_tap(u64 g,float x,float y){
     if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("statue details",0,0); return 1; }
     if(x>=70.f && x<=310.f && y>=150.f && y<=355.f){ if(rt_depth==0){ press(BTN_B); retap_on_change(x,y,30); tm_log2("statue list back",(s64)x,(s64)y); } return 1; } }
   if(abilities_tap(g,o,vt,x,y)) return 1;
+  // battle: item gained with a full inventory, "You can't carry any more. Select an item to send to the convoy." (list vt 0x1a45588):
+  // "B Discard Items" in the corner (only B on the prompt bar)
+  if(vt==0x1a45588 && inbox(x,y,1110.f,1264.f,682.f,718.f)){ press(BTN_B); tm_log2("discard items",0,0); return 1; }
   if(vt==0x1a436f8 && units_sort_tap(o,x,y)) return 1;
   // Units / Unit Info: the six page dots under the tab strip (x 593 + 18.6 per page, y ~113) jump straight to that page (pages 0 Info,
   // 1 Stats, 2 Equipment, 3 Combat, 4 Battalions, 5 Skills). The table's page is owner+0x50c; the tab strip keeps its own {previous,
