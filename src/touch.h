@@ -673,7 +673,11 @@ static int convoy_tap(u64 g,float x,float y){
   // G+0x111e8 is the selected row within the 11 visible ones (not the absolute index), G+0x111e4 the first visible row.
   if(x>=665.f&&x<=1150.f&&y>=214.f&&y<=650.f){
     s32 cnt=RDS32(g+CV_CNT), top=RDS32(g+CV_TOP), ci=RDS32(g+CV_IDX); if(cnt<=0||top<0||ci<0||ci>10) return 1;
-    int t=(int)((y-214.4f)/35.2f), d=t-ci;   // visible row index (row 0 centre = 232)
+    // visible row index: row 0 centre 232, rows 34.67 apart (the hand's step); scrolled to the very end of a list longer than the 11
+    // visible rows, the game shows the last row whole and draws every row 17.3 px lower (a part of the row above shows at the top):
+    // there the fixed layout put taps one row low (Secret Book -> the selected Trade Secret below it, confirmed; the last row ignored)
+    float y0=214.7f+((cnt>11 && top>=cnt-11) ? 17.3f : 0.f);
+    int t=(int)((y-y0)/34.67f), d=t-ci; if(y<y0) return 1;
     if(t<0||t>10||top+t>=cnt) return 1;      // below the last row
     // from the unit list: instant. The convoy looks its row record up again when it takes the focus, so the row is written
     // first and ZR (keeps the tab) moves the hand straight onto it; selected only, the next tap confirms
@@ -916,7 +920,8 @@ static float ab_rowoff(int abil,int arts,s32 cnt,int i){
 // Available Combat Arts (column headers above) 201.3 / 34.7, Barracks 176 / 34.67.
 static void ab_right_geo(int abil,int batt,float*y0,float*p){ *y0= abil ? 162.6f : batt ? 176.f : 201.3f; *p= abil ? 35.05f : 34.7f; }
 // Taps across the two lists: Right (or Left) and, the poll the other list takes the focus, its selection is put on the tapped row
-// (SetIndex next to it + one real step, as list_jump), so the hand goes straight there; the row is armed and the next tap confirms.
+// (SetIndex alone: the hand follows the index; no step, which first sent the hand to row 0 and the neighbouring row), so the hand
+// glides straight there; the row is armed and the next tap confirms.
 // (Before: Right / B, then the tap replayed once the hand had arrived; B in the right list leaves the whole screen (back to the unit
 // picker), and a tap on the first Available row assigned it at once.) The left rows' position is kept by ab_tick
 // while the hand is there (the row-0 hand y), for taps from the right.
@@ -925,7 +930,7 @@ static u64 ab_own; static float ab_l_hy0;
 static void ab_tick(void){
   if(ab_x_w){ if(--ab_x_n<=0 || !mem_ok(ab_x_w)) ab_x_w=0;
     else if((*(volatile u8*)(ab_x_w+8)&0x0c)==0x0c){ u64 w=ab_x_w; ab_x_w=0; s32 cnt=RDS32(w+0x54);
-      if(ab_x_it>=0 && ab_x_it<cnt){ if(RDS32(w+0x4c)!=ab_x_it) list_jump(w,ab_x_it,0); dt_arm(w+0x4c,ab_x_it,0,0); } } }
+      if(ab_x_it>=0 && ab_x_it<cnt){ g_learn_hold=20; if(RDS32(w+0x4c)!=ab_x_it) ((SetIdxFn)(g_main+0x5de5b0))(w,ab_x_it); dt_arm(w+0x4c,ab_x_it,0,0); } } }
   u64 g=cmn_ui(); if(!g || !hand_on(g)) return; u64 o=RD64(g+G_HAND_OWNER); if(!mem_ok(o)) return; u64 vt=RD64(o)-g_main;
   if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return;
   u64 l=o+0x758; if(!is_widget(l,0x1a42108) || (*(volatile u8*)(l+8)&0x0c)!=0x0c) return;
@@ -1011,6 +1016,13 @@ static int units_sort_tap(u64 o,float x,float y){
       press(t>0?BTN_D:BTN_U); dt_arm(o+0x4c,t,0,0); tm_log2("units row from headers",t,top); return 1; }
     if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }
   return 0; }
+static int prompt_bar_has(u64 g,u32 code);
+// Certifications Stat Changes grid cells (720p, from the hand): rows HP / Str / Mag / Dex / Spd at hand y 219.3 / 264 / 297.3 / 330.7 /
+// 364 (HP sits higher), columns from hand x 876 / 1054.7 (cells x 860-1038 / 1038-1235). Down from Spd goes on to the Class Abilities list.
+static const float cert_row_y[5]={219.3f,264.f,297.3f,330.7f,364.f};
+static int cert_stat_at(float x,float y,int*r,int*c){ if(x<860.f||x>1235.f) return 0; int b=-1; float bd=1e9f;
+  for(int i=0;i<5;i++){ float d=y-cert_row_y[i]; if(d<0) d=-d; if(d<bd){ bd=d; b=i; } } if(bd>18.f) return 0;
+  if(r) *r=b; if(c) *c= x>=1038.f; return 1; }
 static int hand_list_tap(u64 g,float x,float y){
   if(!hand_on(g)) return 0;
   u64 o=RD64(g+G_HAND_OWNER); if(!o){ o=own_fallback(); if(o) tm_log2("owner fallback",(s64)(o-g),0); } if(!mem_ok(o)) return 0;
@@ -1020,6 +1032,18 @@ static int hand_list_tap(u64 g,float x,float y){
   if((vt==0x1a00298 || vt==0x19fff68) && widget_vis(o)){ press(BTN_A); tm_log2("tea button",(s64)vt,0); return 1; }
   // Seminar lecturer list: "ZR Classes" prompt in the corner (the list below swallowed it)
   if(vt==0x1a1e648 && inbox(x,y,1150.f,1264.f,682.f,718.f)){ press(BTN_ZR); tm_log2("seminar classes",0,0); return 1; }
+  // Certifications: "+ Mount/Dismount" (mounted classes, prompt bar code 0x8) left of "X Status / Details"
+  if(vt==0x1a1ee00 && inbox(x,y,780.f,965.f,682.f,718.f) && prompt_bar_has(g,0x8)){ press(BTN_PLUS); tm_log2("mount",0,0); return 1; }
+  // ... Stat Changes page (the panel's page G+0x26350: 0 Class Description, 1 Stat Changes): the stats are a 5x2 grid at G+0x26368
+  // (vt 0x1a0db98: HP / Mv, Str / Lck, Mag / Def, Dex / Res, Spd / Cha) that takes the hand on X Details (starting on HP) and shows each
+  // stat's breakdown. A tap on a stat: X, then the stat the moment the grid has the hand; with the hand on the grid: that stat.
+  if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,0,0)){
+    if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,30); tm_log2("cert stat details",(s64)x,(s64)y); } return 1; }
+  if(vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)){ int r,c;
+    if(cert_stat_at(x,y,&r,&c)){ grid_jump(o,r,c,0); tm_log2("cert stat",r,c); return 1; }
+    if(inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); return 1; }               // "X Details": back to the class list
+    if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){ if(rt_depth==0){ press(BTN_B); retap_on_change(x,y,30); } return 1; }   // the class list
+    return 1; }
   // Certifications / Reclass class list: "X Status" ("X Details" on the Stat Changes page) left of "R Rotate", outside the list's range
   if(vt==0x1a1ee00 && inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
   // ... and the ZL / ZR arrows on its description panel (Class Description / Stat Changes / ...)

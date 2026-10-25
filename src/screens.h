@@ -408,13 +408,14 @@ static int prep_tap(u64 g,float x,float y){
 // ---- Advice box (cathedral Counselor: "Would you like to read a note from the advice box?" -> Yes): the note with three timed
 // answers is a list inside the monastery UI object M = *(main+0x1afb448) at M+0x301d0 (vt 0x1a1bca8; idx +0x4c, cnt +0x54; byte +0x21 =
 // shown, 0 once answered). The common hand owner G+0x58 is a hidden widget meanwhile, so the generic lists never got the taps. Answer
-// rows (720p): middles 456.3 / 519 / 581.6, x 339-945. A tap selects a row, a second tap on it answers (the selected one: one tap).
+// rows (720p): middles 456.3 / 519 / 581.6, x 339-945. One tap answers (user: all answers are instant clicks).
 static int advice_tap(u64 g,float x,float y){
   (void)g; u64 m=RD64(g_main+0x1afb448); if(!mem_ok(m)) return 0; u64 w=m+0x301d0; if(!is_widget(w,0x1a1bca8)) return 0;
   s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<1||cnt>3||idx<0||idx>=cnt) return 1;
   if(x<339.f||x>945.f) return 1;
   float f=(y-456.3f)/62.7f; if(f<-0.5f) return 1; int r=(int)(f+0.5f); if(r>=cnt) return 1;
-  list_pick(w,r); tm_log2("advice",r,idx); return 1; }
+  if(r==idx && !q_busy()) press(BTN_A); else list_jump(w,r,1);
+  tm_log2("advice",r,idx); return 1; }
 // ---- Library books (free roam): the reader is a list widget inside the monastery UI object M = *(main+0x1afb448),
 // at M+0x8fdd0 (vt 0x1a22530; page +0x50, pages +0x54). Page arrows under the text, "B Close" prompt; other taps do nothing.
 // (The free-roam HUD stays visible underneath, so without this the corner prompts would get the taps.)
