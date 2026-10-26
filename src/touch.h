@@ -1052,6 +1052,12 @@ static void fz_tick(void){ if(!fz_w) return; if(--fz_n<=0){ fz_w=0; return; } u6
   if(fz_c>=0 && RDS32(w+0x50)!=fz_c) set_col(w,fz_c);
   if(fz_r>=0 && fz_r<cnt && RDS32(w+0x4c)!=fz_r) ((SetIdxFn)(g_main+0x5de5b0))(w,fz_r);
   if(fz_arm && fz_r>=0) dt_arm(w+0x4c,fz_r,0,0); }
+// Trade screen (vt 0x1a39fc8): a tap on the other side's row, set the poll the side has switched
+static u64 tr_o; static int tr_side, tr_r, tr_n;
+static void tr_tick(void){ if(!tr_o) return; if(--tr_n<=0 || !mem_ok(tr_o) || RD64(tr_o)!=g_main+0x1a39fc8){ tr_o=0; return; }
+  if(RDS32(tr_o+0x50)!=tr_side) return;
+  u64 tl= tr_side ? tr_o+0xde0 : tr_o+0xa0; tr_o=0;
+  if(tr_r<RDS32(tl+0x54) && RDS32(tl+0x4c)!=tr_r){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(tl,tr_r); tm_log2("trade side fix",tr_r,0); } }
 // Certifications class list G+0x25bc8 (vt 0x1a1ee00): the hand's row while it is there, so a tap on the list from the stat grid can be
 // placed (rows 53.33 apart, from the hand)
 static float cert_cl_hy; static s32 cert_cl_idx=-1;
@@ -1104,17 +1110,19 @@ static int hand_list_tap(u64 g,float x,float y){
   // and the right one at +0xde0 (vt 0x19f99e8), the active side at +0x50 (0 left, 1 right); the generic list skipped the container.
   // Rows don't scroll (6 slots): hand y 304 + 34.67 per row, rows x 176-545 / 726-1092. A on an item picks it and moves the hand to the
   // other side; A there swaps. A tap on the active side selects the row (the selected one: A at once, the next tap on it: A); on the
-  // other side the active list's index is set to the row first, then Left / Right, which carries the row across.
+  // other side that side's list gets the row first, then Left / Right, and once the side has switched (+0x50) the row is set again if
+  // the game put the hand elsewhere: Left / Right goes to that list's own row, except after an Up / Down on this side, when it carries
+  // the row across (File 3, Byleth / Dedue).
   if(vt==0x1a39fc8 && widget_vis(o)){
     if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); return 1; }   // X Details
     int side= x>=176.f&&x<=545.f ? 0 : x>=726.f&&x<=1092.f ? 1 : -1; if(side<0) return 1;
     float f=(y-304.f)/34.67f; int r=(int)(f+(f>=0?0.5f:-0.5f)); if(r<0||r>5||y<283.f) return 1;
     s32 act=RDS32(o+0x50); if(act<0||act>1) return 1;
-    u64 al= act ? o+0xde0 : o+0xa0, tl= side ? o+0xde0 : o+0xa0;
+    u64 tl= side ? o+0xde0 : o+0xa0;
     s32 tcnt=RDS32(tl+0x54); if(r>=tcnt) return 1;
     if(side==act){ list_pick(tl,r); tm_log2("trade row",side*10+r,act); return 1; }
-    s32 acnt=RDS32(al+0x54); if(r<acnt && r!=RDS32(al+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(al,r); }
-    q_push(side?BTN_R:BTN_L,2,3); dt_arm(tl+0x4c,r,0,0); tm_log2("trade side",side*10+r,act); return 1; }
+    if(r!=RDS32(tl+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(tl,r); }
+    q_push(side?BTN_R:BTN_L,2,3); dt_arm(tl+0x4c,r,0,0); tr_o=o; tr_side=side; tr_r=r; tr_n=40; tm_log2("trade side",side*10+r,act); return 1; }
   // Saint Statue Artisan: rewards list (right): "X Details" in the corner; a tap on the statue list (left) goes back there first
   if(vt==0x1a1f3f8 && widget_vis(o)){
     if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("statue details",0,0); return 1; }

@@ -13,7 +13,8 @@ static int prompt_tap(float x,float y,const Prompt*p,int n){
 
 // ---- Calendar (Base of Operations) ----
 // Main screen: hand list Explore/Seminar/Battle/Rest (vt 0x1a07bd8), the month calendar on the right (drawn 47.7 px left of
-// its position in schedule mode) and prompts L Unit Appearance / - Statistics / X Menu / Right Check Schedule.
+// its position in schedule mode; day rows from y 193, under the weekday names) and prompts L Unit Appearance / - Statistics / X Menu /
+// Right Check Schedule.
 // Schedule mode (Right): hand owner vt 0x1a249f8, selected day (1-based) at owner+0x88, month at owner+0xa4.
 // Day cells (720p): Mon..Sat 80.3 wide from x 569.6, Sun 1051.6-1213.2; rows 66.67 apart. The hand sits 20.4 px right of a
 // cell's left edge (Sun: hand x 1096.7) and 17.4 px below its top.
@@ -42,7 +43,7 @@ static int calendar_tap(u64 g,float x,float y){
   u64 o; u64 vt=hand_owner_vt(g,&o);
   if(vt==VT_CAL_MENU){
     if(prompt_tap(x,y,cal_prompts,NP(cal_prompts))) return 1;
-    if(cal_col_at(x+47.7f)>=0 && y>=230.f && y<=640.f){ press(BTN_R); retap_on_change(x+47.7f,y,30); rt_settle=1; tm_log2("calendar open",(s64)x,(s64)y); return 1; }   // replayed once the days have the hand and it stopped (a fixed 30 polls was slow; right away the step got lost while the calendar slid)
+    if(cal_col_at(x+47.7f)>=0 && y>=190.f && y<=640.f){ press(BTN_R); retap_on_change(x+47.7f,y,30); rt_settle=1; tm_log2("calendar open",(s64)x,(s64)y); return 1; }   // replayed once the days have the hand and it stopped (a fixed 30 polls was slow; right away the step got lost while the calendar slid)
     return 0; }                                   // rows: hprof "calendar"
   if(vt==VT_CAL_POP && cal_ev_n>0){              // event-panel tap on its way: "View Schedule Details" (single item) -> A
     cal_ev_n=0; s32 cnt=RDS32(o+0x54); if(cnt==1){ press(BTN_A); if(rt_depth<2) retap_on_change(x,y,40); } tm_log2("calendar popup",cnt,0); return 1; }
@@ -640,17 +641,26 @@ static u64 bd_node_of(u64 gr,u64 L){ u32 n=RD32(gr+0x34); for(u32 k=0;k<n;k++){ 
 static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){ if(page!=0 || r<3) return 0.f;
   int ms=-1; for(int i=2;i<cnt&&i<40;i++){ if(*(volatile u16*)(L+0x84+2*i)>=0x100){ ms=i; break; } }
   return (ms>2 && r>=ms) ? 52.f : 0.f; }
+// A scrolled list (s16 +0x6a > 0) moves its rows up by a distance that isn't stored (it stops at the end of the list: Annette's 9 rows
+// scroll 20.5 px), while page 0's two equipped rows stay put. It is measured from the hand on a scrolling row; with the hand elsewhere
+// (another panel) the row can't be placed: -2 (bdetail_tap moves the focus here first and replays the tap).
 static int bd_inv_row(u64 g,u64 L,int foc,float x,float y){
   if(x<835.f||x>1215.f) return -1; s32 page=RDS32(L+0xfe0), idx=RDS32(L+0x4c), cnt=RDS32(L+0x54); if(cnt<=0||cnt>20) return -1;
-  float base;
-  if(foc && idx>=0 && idx<cnt) base=RDF(g+0x30)/1.5f-1.f-bd_row(page,idx)-bd_row_ex(L,page,cnt,idx);
-  else if(page==0||page==4||page==5) base=RDF(L+0x30)/1.5f+33.f; else if(page==2) base=RDF(L+0x30)/1.5f+74.3f; else return -1;
-  int best=-1; float bd=1e9f; for(int r=0;r<cnt;r++){ float d=y-(base+bd_row(page,r)+bd_row_ex(L,page,cnt,r)); if(d<0)d=-d; if(d<bd){ bd=d; best=r; } }
+  float base= (page==0||page==4||page==5) ? RDF(L+0x30)/1.5f+33.f : page==2 ? RDF(L+0x30)/1.5f+74.3f : -1.f, sc=0.f;
+  int scrolled=(short)*(volatile u16*)(L+0x6a)>0;
+  if(foc && idx>=0 && idx<cnt){ float hy=RDF(g+0x30)/1.5f-1.f-bd_row(page,idx)-bd_row_ex(L,page,cnt,idx);
+    if(base<0.f) base=hy; else if(page!=0 || idx>=2) sc=base-hy; }
+  else if(base<0.f) return -1;
+  else if(scrolled) return (y>=base-20.f && y<=base+420.f) ? -2 : -1;
+  int best=-1; float bd=1e9f; for(int r=0;r<cnt;r++){ float d=y-(base+bd_row(page,r)+bd_row_ex(L,page,cnt,r)-((page!=0||r>=2)?sc:0.f)); if(d<0)d=-d; if(d<bd){ bd=d; best=r; } }
   return bd<=19.f ? best : -1; }
 // Battalion page (page owner+0xfe0 = 3): rows at the list's y origin (+0x30, 1080p) + 74.3 / 115 / 147 (hand y, 720p); row 1 has
 // two items (Battalion Level x 870, Exp x 1053). Returns the row, -1 for none.
 static int bd_bat_hit(u64 L,float x,float y,int*oc){ if(x<845.f||x>1215.f) return -1; float ry=y-RDF(L+0x30)/1.5f; *oc=0;
   if(ry>=58.f&&ry<94.f) return 0; if(ry>=94.f&&ry<131.f){ *oc= x>=1040.f; return 1; } if(ry>=131.f&&ry<166.f) return 2; return -1; }
+// the cursor sound: the list's vfunc +0x180, which the lists' own d-pad code calls when the row or column changes (main+0x5de0f0 /
+// 0x5de2e8; it plays SE 0x1b2 when list+0x60 is set). SetIndex doesn't play it.
+static void bd_sound(u64 L){ if(mem_ok(L) && RD64(L)) ((void(*)(u64))RD64(RD64(L)+0x180))(L); }
 static int bdetail_tap(u64 g,float x,float y){
   u64 gr=bd_graph(); if(!gr || !hand_on(g)) return 0; u64 h=hud(), o=RD64(g+G_HAND_OWNER); if(!bd_node_of(gr,o)) return 0;
   if(prompt_tap(x,y,bdetail_prompts,NP(bdetail_prompts))) return 1;
@@ -660,7 +670,12 @@ static int bdetail_tap(u64 g,float x,float y){
   int bpage=0;   // Battalion page: a 3x2 grid (rows: battalion / Battalion Level, Exp / gambit), help text only in Details
   { u64 inv=h+0x830b8; if(is_widget(inv,0x19f9678) && bd_node_of(gr,inv)){
       if(RDS32(inv+0xfe0)==3){ int cc=0, rr=bd_bat_hit(inv,x,y,&cc); if(rr>=0 && rr<RDS32(inv+0x54)){ L=inv; r=rr; c=cc; bpage=1; } }
-      else { int rr=bd_inv_row(g,inv,o==inv,x,y); if(rr>=0){ L=inv; r=rr; } } } }
+      else { int rr=bd_inv_row(g,inv,o==inv,x,y); if(rr>=0){ L=inv; r=rr; }
+        else if(rr==-2){ if(rt_depth==0 && *(volatile u8*)(gr+0x30)){   // scrolled: hand onto the list first, then place the row from it
+            if(mem_ok(o)) *(volatile u8*)(o+8)&=(u8)~0x0c; *(volatile u8*)(inv+8)|=0x0c;
+            *(volatile u64*)(g+G_HAND_OWNER)=inv; *(volatile u64*)(gr+0x10)=bd_node_of(gr,inv); bd_sound(inv);
+            retap_later(x,y,4); tm_log2("bdetail scrolled list",(s64)x,(s64)y); }
+          return 1; } } } }
   // Status effects (gambit hit, stat debuffs ...): the top panel list gets an extra row 0 with one icon per status, drawn above the name
   // bar (icons ~28 px, first at x 39-67, y = origin - 65 .. - 39). The other rows move down by one index; per-row column counts at +0x53c.
   { u64 W=h+0x7c7c8; if(!L && widget_vis(W) && bd_node_of(gr,W) && RDS32(W+0x54)==5){ float oy=RDF(W+0x30)/1.5f; int nc=*(volatile u8*)(W+0x53c);
@@ -679,7 +694,7 @@ static int bdetail_tap(u64 g,float x,float y){
     break; }
   if(!L) return 1;
   if(!det){                                                    // outside Details: rows of the right-hand list as before, the rest opens Details first
-    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
+    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); bd_sound(L); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
     if(rt_depth==0){ press(BTN_X); retap_later(x,y,60); rt_wait_det=2; tm_log2("bdetail details",(s64)x,(s64)y); }
     return 1; }
   if(L==o && (r<0 || RDS32(L+0x4c)==r) && RDS32(L+0x50)==c) return 1;   // already there
@@ -687,4 +702,4 @@ static int bdetail_tap(u64 g,float x,float y){
     *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(gr+0x10)=bd_node_of(gr,L); }
   if(RDS32(L+0x58)>1) set_col(L,c);
   if(r>=0) ((SetIdxFn)(g_main+0x5de5b0))(L,r);
-  g_learn_hold=20; tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }
+  bd_sound(L); g_learn_hold=20; tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }
