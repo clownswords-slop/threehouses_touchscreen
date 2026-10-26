@@ -517,8 +517,11 @@ static int title_flow_tap(u64 g,float x,float y){
   u64 own=RD64(g+G_HAND_OWNER); u64 ovt= mem_ok(own) ? RD64(own)-g_main : 0;
   // the list widget's vis byte stays set after a file is loaded, so also require the hand to belong to the file list
   int load_list = RD64(sl)==g_main+0x1a3c1f8 && widget_vis(sl) && ovt==0x1a3aee0;
+  // battle HUD lists (unit details: the abilities row's 3rd slot puts the hand at raw x 229.5) are never the save list: they were taken
+  // for it, and every tap after that pressed Up / Down + A
+  u64 hh=hud(); int in_hud= hh && own>=hh && own<hh+0xa0000;
   int save_list = !load_list && hx>=225.f && hx<=237.f    // save mode uses another widget; recognise it by the hand column
-                  && ovt!=0x1a431f8 && own!=g+0x2250;      // ...but not the Options list, whose hand passes through that column
+                  && ovt!=0x1a431f8 && own!=g+0x2250 && !in_hud;   // ...but not the Options list, whose hand passes through that column
   if(load_list || save_list){                              // save file list (Continue / Load / Save)
     s32 tab= load_list ? RDS32(g+0x60a98) : -1;
     if(y<95.f){ // Main Story / Side Story tabs (ZL / ZR)
@@ -738,6 +741,20 @@ static int options_tap(u64 g,float x,float y){
     tm_log2("options row",it,idx); return 1; }
   return 0;
 }
+// Battle "Items" list (HUD+0xee20, vt 0x19f9678): rows 34.67 apart from hand y 133.3 (the hand sits on a row's middle). The entries are
+// u16 at +0x84 (count +0x80): inventory slots (< 0x100), then spells (magic ids >= 0x100); a "Magic" section header (52 px) sits
+// before the first spell when items come before it (Manuela: Iron Sword, Intermediate Seal | Magic: Nosferatu, Heal, Ward, Silence:
+// the old even rows put taps on the spells a row or two off). Not scrolled: absolute; scrolled: from the hand.
+static int bitems_magic_start(u64 w,s32 cnt){ for(int i=0;i<cnt&&i<40;i++){ u16 id=*(volatile u16*)(w+0x84+2*i); if(id>=0x100) return i; } return -1; }
+static float bitems_row_y(u64 g,u64 w,int i){
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); int ms=bitems_magic_start(w,cnt); int top=(s32)(short)(RD32(w+0x68)>>16);
+  float hd= ms>0 ? 52.f : 0.f;
+  if(top==0) return 133.3f+34.67f*(float)i+(ms>0 && i>=ms ? hd : 0.f);
+  float hy=RDF(g+0x30)/1.5f; return hy+34.67f*(float)(i-idx)+((ms>0 && i>=ms)?hd:0.f)-((ms>0 && idx>=ms)?hd:0.f); }
+static int bitems_pick(u64 g,u64 w,float x,float y){
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0; if(x<835.f||x>1215.f) return 0;
+  int best=-1; float bd=1e9f; for(int i=0;i<cnt;i++){ float d=y-bitems_row_y(g,w,i); if(d<0) d=-d; if(d<bd){ bd=d; best=i; } }
+  if(best<0||bd>18.f) return 0; list_pick(w,best); tm_log2("items",best,idx); return 1; }
 // item screens: battle "Items" list + its Use/Trade/Discard submenu, and the convoy screen.
 // returns 1 if the tap was consumed
 static int items_tap(float x,float y){
@@ -746,10 +763,10 @@ static int items_tap(float x,float y){
     u64 lst=h+0xee20, sub=h+0x1c630;
     if(is_widget(lst,0x19f9678)){
       if(is_widget(sub,0x19f9830)){
-        float y0=131.f+35.6f*(float)RDS32(lst+0x4c)-2.5f;
+        float y0=bitems_row_y(cmn_ui(),lst,RDS32(lst+0x4c))-4.8f;
         rows_tap(sub,x,y,660.f,830.f,y0,34.5f,"itemsub");
         return 1; }
-      rows_pick(lst,x,y,835.f,1215.f,131.f,35.6f,"items");
+      { u64 g=cmn_ui(); if(g) bitems_pick(g,lst,x,y); }
       return 1; }
   }
   u64 g=cmn_ui();
@@ -1006,6 +1023,9 @@ static int units_sort_tap(u64 o,float x,float y){
     for(int k=0;k<p->n;k++) if(x>=units_colx(p,k)+10.f) t=p->name+1+k;
     if(hdr && cc==t){ press(BTN_A); tm_log2("units sort again",t,pg); return 1; }
     *(volatile u8*)(o+0x710)=1;
+    // the Name column of the pages after Info can't be reached with Left / Right (Left from the first data column goes to the previous
+    // page's last column, Right from there to the first data column again): the column is written directly, A then sorts by it (tested)
+    if(t==p->name && pg>0){ *(volatile s32*)(o+0x508)=t; press(BTN_A); tm_log2("units sort name",t,pg); return 1; }
     if(t==p->name){ *(volatile s32*)(o+0x508)=t+1; q_push(BTN_L,2,4); } else { *(volatile s32*)(o+0x508)=t-1; q_push(BTN_R,2,4); }
     press(BTN_A); tm_log2("units sort",t,pg); return 1; }
   // a row while the hand is on the headers (e.g. right after sorting): Down from the headers always goes to the first row, so the

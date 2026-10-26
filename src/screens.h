@@ -634,12 +634,18 @@ static int bdet_det_now(void){ u64 gr=bd_graph(); return gr && *(volatile u8*)(g
 static u64 bd_node_of(u64 gr,u64 L){ u32 n=RD32(gr+0x34); for(u32 k=0;k<n;k++){ u64 nd=gr+0x38+(u64)k*0x30; if(RD64(nd)==L) return nd; } return 0; }
 // the right-hand list: rows from the hand when it is there, else from the list's origin (Inventory page 0 / Combat Arts page 2 /
 // monster pages 4, 5)
+// Inventory page 0: after the two equipped rows the "Items" header, then a "Magic" header (52 px) before the first spell when items come
+// before it. The entries are u16 at +0x84 (inventory slots < 0x100, magic ids >= 0x100), as in the battle Items list (Dorothea: Fire,
+// Iron Shield | Items: 4 | Magic: Thunder ...: taps on the spells landed a row or two off).
+static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){ if(page!=0 || r<3) return 0.f;
+  int ms=-1; for(int i=2;i<cnt&&i<40;i++){ if(*(volatile u16*)(L+0x84+2*i)>=0x100){ ms=i; break; } }
+  return (ms>2 && r>=ms) ? 52.f : 0.f; }
 static int bd_inv_row(u64 g,u64 L,int foc,float x,float y){
   if(x<835.f||x>1215.f) return -1; s32 page=RDS32(L+0xfe0), idx=RDS32(L+0x4c), cnt=RDS32(L+0x54); if(cnt<=0||cnt>20) return -1;
   float base;
-  if(foc && idx>=0 && idx<cnt) base=RDF(g+0x30)/1.5f-1.f-bd_row(page,idx);
+  if(foc && idx>=0 && idx<cnt) base=RDF(g+0x30)/1.5f-1.f-bd_row(page,idx)-bd_row_ex(L,page,cnt,idx);
   else if(page==0||page==4||page==5) base=RDF(L+0x30)/1.5f+33.f; else if(page==2) base=RDF(L+0x30)/1.5f+74.3f; else return -1;
-  int best=-1; float bd=1e9f; for(int r=0;r<cnt;r++){ float d=y-(base+bd_row(page,r)); if(d<0)d=-d; if(d<bd){ bd=d; best=r; } }
+  int best=-1; float bd=1e9f; for(int r=0;r<cnt;r++){ float d=y-(base+bd_row(page,r)+bd_row_ex(L,page,cnt,r)); if(d<0)d=-d; if(d<bd){ bd=d; best=r; } }
   return bd<=19.f ? best : -1; }
 // Battalion page (page owner+0xfe0 = 3): rows at the list's y origin (+0x30, 1080p) + 74.3 / 115 / 147 (hand y, 720p); row 1 has
 // two items (Battalion Level x 870, Exp x 1053). Returns the row, -1 for none.
