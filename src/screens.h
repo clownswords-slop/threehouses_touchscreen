@@ -679,7 +679,7 @@ static int bdetail_tap(u64 g,float x,float y){
     break; }
   if(!L) return 1;
   if(!det){                                                    // outside Details: rows of the right-hand list as before, the rest opens Details first
-    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)) list_jump(L,r,0); tm_log2("bdetail",r,0); return 1; }
+    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
     if(rt_depth==0){ press(BTN_X); retap_later(x,y,60); rt_wait_det=2; tm_log2("bdetail details",(s64)x,(s64)y); }
     return 1; }
   if(L==o && (r<0 || RDS32(L+0x4c)==r) && RDS32(L+0x50)==c) return 1;   // already there

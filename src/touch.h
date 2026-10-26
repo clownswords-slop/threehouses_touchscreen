@@ -239,6 +239,10 @@ static void chase_tick(void){
   chase_lastbtn=dbtn[best]; q_push(dbtn[best],1,2);
 }
 
+// the unit on a map cell (cell +0: unit pointer). Unit +0xf1 = army (0 player, 1 enemy, 2 ally, 4 obstacle: walls "Impassable until it
+// is attacked and destroyed"), +0xfe bit 2 = has acted this turn (set by Wait; measured on File 2)
+static u64 tile_unit(int x,int y){ u64 g=RD64(g_main+0x1aa7cc8); if(!g) return 0; u64 base=RD64(g); if(!base) return 0; if(x<0||y<0||x>31||y>31) return 0;
+  u64 u=RD64(base+(u64)y*0x600+(u64)x*0x30); return (u && mem_ok(u)) ? u : 0; }
 static int tile_has_unit(int x,int y){ u64 g=RD64(g_main+0x1aa7cc8); if(!g) return 0; u64 base=RD64(g); if(!base) return 0; if(x<0||y<0||x>31||y>31) return 0; u64 c=base+(u64)y*0x600+(u64)x*0x30; return RD64(c)!=0; }
 // ---- camera / picking ----
 static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) return 0; float asp=RDF(p+0x1bc); if(!(asp>1.5f&&asp<2.0f)) return 0; return p; }
@@ -1038,6 +1042,21 @@ static int units_sort_tap(u64 o,float x,float y){
     if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }
   return 0; }
 static int prompt_bar_has(u64 g,u32 code);
+// Pending focus: after a press that hands the hand to another list (X / B), the poll that list owns the hand (G+0x58) its selection is
+// set to the tapped row / column directly (SetColumn / SetIndex alone: the hand and the info follow, tested on the Stat Changes grid),
+// so the hand goes straight there instead of the tap being replayed and stepped. arm: the next tap on that row confirms.
+static u64 fz_w; static int fz_r, fz_c, fz_arm, fz_n;
+static void fz_set(u64 w,int r,int c,int arm){ fz_w=w; fz_r=r; fz_c=c; fz_arm=arm; fz_n=60; }
+static void fz_tick(void){ if(!fz_w) return; if(--fz_n<=0){ fz_w=0; return; } u64 g=cmn_ui(); if(!g || !hand_on(g) || RD64(g+0x58)!=fz_w) return;
+  u64 w=fz_w; fz_w=0; g_learn_hold=20; s32 cnt=RDS32(w+0x54);
+  if(fz_c>=0 && RDS32(w+0x50)!=fz_c) set_col(w,fz_c);
+  if(fz_r>=0 && fz_r<cnt && RDS32(w+0x4c)!=fz_r) ((SetIdxFn)(g_main+0x5de5b0))(w,fz_r);
+  if(fz_arm && fz_r>=0) dt_arm(w+0x4c,fz_r,0,0); }
+// Certifications class list G+0x25bc8 (vt 0x1a1ee00): the hand's row while it is there, so a tap on the list from the stat grid can be
+// placed (rows 53.33 apart, from the hand)
+static float cert_cl_hy; static s32 cert_cl_idx=-1;
+static void cert_tick(void){ u64 g=cmn_ui(); if(!g || !hand_on(g)) return; u64 o=RD64(g+0x58); if(o!=g+0x25bc8 || RD64(o)!=g_main+0x1a1ee00) return;
+  cert_cl_hy=RDF(g+0x30)/1.5f; cert_cl_idx=RDS32(o+0x4c); }
 // Certifications Stat Changes grid cells (720p, from the hand): rows HP / Str / Mag / Dex / Spd at hand y 219.3 / 264 / 297.3 / 330.7 /
 // 364 (HP sits higher), columns from hand x 876 / 1054.7 (cells x 860-1038 / 1038-1235). Down from Spd goes on to the Class Abilities list.
 static const float cert_row_y[5]={219.3f,264.f,297.3f,330.7f,364.f};
@@ -1045,8 +1064,13 @@ static int cert_stat_at(float x,float y,int*r,int*c){ if(x<860.f||x>1235.f) retu
   for(int i=0;i<5;i++){ float d=y-cert_row_y[i]; if(d<0) d=-d; if(d<bd){ bd=d; b=i; } } if(bd>18.f) return 0;
   if(r) *r=b; if(c) *c= x>=1038.f; return 1; }
 static int hand_list_tap(u64 g,float x,float y){
-  if(!hand_on(g)) return 0;
-  u64 o=RD64(g+G_HAND_OWNER); if(!o){ o=own_fallback(); if(o) tm_log2("owner fallback",(s64)(o-g),0); } if(!mem_ok(o)) return 0;
+  // a Yes / No box (G+0xe00) that just closed: the game leaves the hand off and G+0x58 on the box until the hand moves (Instruct: No on
+  // "You still have sessions remaining. Do you want to stop?"), so the tap fell through to A and confirmed the skill still selected; the
+  // list underneath (the most recent visible list owner) takes the tap (its rows come from the settled row-0 position: the hand
+  // coordinates still point at the box)
+  int yn_closed= RD64(g+G_HAND_OWNER)==g+0xe00 && !widget_vis(g+0xe00);
+  if(!hand_on(g) && !(yn_closed && own_fallback())) return 0;
+  u64 o=RD64(g+G_HAND_OWNER); if(!o || yn_closed){ o=own_fallback(); if(o) tm_log2("owner fallback",(s64)(o-g),0); } if(!mem_ok(o)) return 0;
   u64 vt=RD64(o)-g_main; const HandProf*p=0;
   // tea party: "Offer some tea" (vt 0x1a00298) and the "A Talk!" prompt (vt 0x19fff68) are single buttons whose list has no
   // rows (count 0), so the generic list below swallowed every tap: a tap anywhere presses A
@@ -1058,12 +1082,14 @@ static int hand_list_tap(u64 g,float x,float y){
   // ... Stat Changes page (the panel's page G+0x26350: 0 Class Description, 1 Stat Changes): the stats are a 5x2 grid at G+0x26368
   // (vt 0x1a0db98: HP / Mv, Str / Lck, Mag / Def, Dex / Res, Spd / Cha) that takes the hand on X Details (starting on HP) and shows each
   // stat's breakdown. A tap on a stat: X, then the stat the moment the grid has the hand; with the hand on the grid: that stat.
-  if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,0,0)){
-    if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,30); tm_log2("cert stat details",(s64)x,(s64)y); } return 1; }
+  { int r,c; if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,&r,&c)){
+    press(BTN_X); fz_set(g+0x26368,r,c,0); tm_log2("cert stat details",r,c); return 1; } }
   if(vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)){ int r,c;
-    if(cert_stat_at(x,y,&r,&c)){ grid_jump(o,r,c,0); tm_log2("cert stat",r,c); return 1; }
+    if(cert_stat_at(x,y,&r,&c)){ g_learn_hold=20; if(RDS32(o+0x50)!=c) set_col(o,c); if(RDS32(o+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(o,r); tm_log2("cert stat",r,c); return 1; }
     if(inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); return 1; }               // "X Details": back to the class list
-    if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){ if(rt_depth==0){ press(BTN_B); retap_on_change(x,y,30); } return 1; }   // the class list
+    if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){                                // the class list: B, then the tapped class (armed)
+      u64 cl=g+0x25bc8; int t=-1; if(cert_cl_idx>=0 && RD64(cl)==g_main+0x1a1ee00){ float f=(y-cert_cl_hy)/53.33f; t=cert_cl_idx+(int)(f+(f>=0?0.5f:-0.5f)); if(t<0||t>=RDS32(cl+0x54)) t=-1; }
+      press(BTN_B); if(t>=0) fz_set(cl,t,-1,1); tm_log2("cert class from stats",t,0); return 1; }
     return 1; }
   // Certifications / Reclass class list: "X Status" ("X Details" on the Stat Changes page) left of "R Rotate", outside the list's range
   if(vt==0x1a1ee00 && inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
@@ -1385,6 +1411,11 @@ static void on_tap(float x,float y){
     int tx,ty; if(pick_tile(x,y,&tx,&ty)){ int cx,cy; cursor_get(&cx,&cy);
       if(tlog){ Buf bb={0}; bstr(&bb,"[touchmod] tile "); bint(&bb,tx); bput(&bb,','); bint(&bb,ty); bstr(&bb," cur "); bint(&bb,cx); bput(&bb,','); bint(&bb,cy); bflush(&bb); }
       int has_unit=tile_has_unit(tx,ty);
+      // a first tap presses A only on a unit of yours that can still act (it selects it) or an enemy (A marks its range); allies,
+      // obstacles (destructible walls) and units that have acted open a menu on A, so the first tap only puts the cursor there and a
+      // second tap on it presses A (the branch below)
+      if(phase==0 && has_unit){ u64 u=tile_unit(tx,ty); if(u){ u8 army=*(volatile u8*)(u+0xf1);
+          if(army==2 || army==4 || (army==0 && (*(volatile u8*)(u+0xfe)&4))) has_unit=0; } }
       int want_a = (phase!=0) || has_unit;
       if(cx==tx&&cy==ty){ move_confirmed(); q_push(BTN_A,2,3); }
       else if(phase==1 && cell_at(tx,ty) && !(*(volatile u8*)(cell_at(tx,ty)+0x26)&3)){
