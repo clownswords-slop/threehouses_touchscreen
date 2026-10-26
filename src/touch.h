@@ -1050,6 +1050,9 @@ static int hand_list_tap(u64 g,float x,float y){
   // ... and the ZL / ZR arrows on its description panel (Class Description / Stat Changes / ...)
   if(vt==0x1a1ee00 && y>=150.f && y<=192.f){ if(x>=840.f&&x<=925.f){ press(BTN_ZL); return 1; } if(x>=1140.f&&x<=1230.f){ press(BTN_ZR); return 1; } }
   // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
+  // dogs / cats (Gifts prompt, the one-row list vt 0x1a083f0 also used by the world prompts): "X Details" in the corner, when the bar has X
+  if(vt==0x1a083f0 && inbox(x,y,1150.f,1264.f,682.f,718.f) && prompt_bar_has(g,0x1000)){ press(BTN_X); tm_log2("pet details",0,0); return 1; }
+  if(vt==0x1a1c878 && inbox(x,y,1075.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("change tournament",0,0); return 1; }   // "X Change Tournament"
   if(vt==0x1a1c878 && y>=275.f && y<=320.f){ if(x>=815.f&&x<=890.f){ press(BTN_ZL); return 1; } if(x>=1180.f&&x<=1260.f){ press(BTN_ZR); return 1; } }
   // Inventory -> Items -> Trade (two units' items side by side): the hand owner (vt 0x1a39fc8) holds the left list at +0xa0 (vt 0x1a49c40)
   // and the right one at +0xde0 (vt 0x19f99e8), the active side at +0x50 (0 left, 1 right); the generic list skipped the container.

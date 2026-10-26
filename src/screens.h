@@ -541,10 +541,15 @@ static int guild_tap(u64 g,float x,float y){
   if(x<55.f||x>720.f||y<160.f||y>375.f) return 1;
   float f=(y-(hy+3.f))/34.67f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int t=idx+d; if(t<0||t>=cnt) return 1;
   list_pick(o,t); tm_log2(dismiss?"guild dismiss":"guild hire",t,idx); return 1; }
+// A lone "B Back" / "B Close" in the corner with no hand on screen (e.g. the amiibo Gazebo's "Please hold the amiibo to the NFC area."):
+// the prompt bar has exactly one entry, B (0x4000); a tap on it presses B
+static int lone_back_tap(u64 g,float x,float y){
+  if(hand_on(g) || RDS32(g+0x118)!=1 || RD32(g+0xf0)!=0x4000 || !inbox(x,y,1150.f,1264.f,682.f,718.f)) return 0;
+  press(BTN_B); tm_log2("lone back",0,0); return 1; }
 static int screens_tap(u64 g,float x,float y){
   if(sell_dialog_tap(g,x,y)) return 1;
   if(extras_tap(g,x,y) || dlc_tap(g,x,y)) return 1;
-  if(prep_tap(g,x,y) || book_tap(g,x,y) || advice_tap(g,x,y) || results_tap(g,x,y) || calanim_tap(g,x,y) || house_tap(g,x,y)) return 1;
+  if(lone_back_tap(g,x,y) || prep_tap(g,x,y) || book_tap(g,x,y) || advice_tap(g,x,y) || results_tap(g,x,y) || calanim_tap(g,x,y) || house_tap(g,x,y)) return 1;
   if(guild_tap(g,x,y)) return 1;
   if(bdetail_tap(g,x,y) || calendar_tap(g,x,y) || roster_tap(g,x,y) || status_tap(g,x,y) || quest_detail_tap(g,x,y) || header_tap(g,x,y)) return 1;
   if(appearance_screen(g)){ if(prompt_tap(x,y,appear_prompts,NP(appear_prompts))) return 1; if(!hand_on(g)) return 1; }  // swap display: other taps do nothing
