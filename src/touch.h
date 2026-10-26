@@ -240,7 +240,7 @@ static void chase_tick(void){
 }
 
 // the unit on a map cell (cell +0: unit pointer). Unit +0xf1 = army (0 player, 1 enemy, 2 ally, 4 obstacle: walls "Impassable until it
-// is attacked and destroyed"), +0xfe bit 2 = has acted this turn (set by Wait; measured on File 2)
+// is attacked and destroyed"), +0xd6 bit 2 = has acted this turn (set by Wait on File 2; the greyed unit on the bookmark map. +0xfe is 0x04 on every unit there)
 static u64 tile_unit(int x,int y){ u64 g=RD64(g_main+0x1aa7cc8); if(!g) return 0; u64 base=RD64(g); if(!base) return 0; if(x<0||y<0||x>31||y>31) return 0;
   u64 u=RD64(base+(u64)y*0x600+(u64)x*0x30); return (u && mem_ok(u)) ? u : 0; }
 static int tile_has_unit(int x,int y){ u64 g=RD64(g_main+0x1aa7cc8); if(!g) return 0; u64 base=RD64(g); if(!base) return 0; if(x<0||y<0||x>31||y>31) return 0; u64 c=base+(u64)y*0x600+(u64)x*0x30; return RD64(c)!=0; }
@@ -1415,7 +1415,7 @@ static void on_tap(float x,float y){
       // obstacles (destructible walls) and units that have acted open a menu on A, so the first tap only puts the cursor there and a
       // second tap on it presses A (the branch below)
       if(phase==0 && has_unit){ u64 u=tile_unit(tx,ty); if(u){ u8 army=*(volatile u8*)(u+0xf1);
-          if(army==2 || army==4 || (army==0 && (*(volatile u8*)(u+0xfe)&4))) has_unit=0; } }
+          if(army==2 || army==4 || (army==0 && (*(volatile u8*)(u+0xd6)&4))) has_unit=0; } }
       int want_a = (phase!=0) || has_unit;
       if(cx==tx&&cy==ty){ move_confirmed(); q_push(BTN_A,2,3); }
       else if(phase==1 && cell_at(tx,ty) && !(*(volatile u8*)(cell_at(tx,ty)+0x26)&3)){
