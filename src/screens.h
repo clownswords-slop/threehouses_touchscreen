@@ -221,7 +221,7 @@ static int status_instant(u64 g,float x,float y){
     if(L!=old){ if(mem_ok(old)) *(volatile u8*)(old+8)&=(u8)~0x0c; *(volatile u8*)(L+8)|=0x0c;
       *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(g+G_STCUR)=nd; }
     if(RDS32(L+0x58)>1) set_col(L,c);
-    ((SetIdxFn)(g_main+0x5de5b0))(L,r);
+    ((SetIdxFn)(g_main+0x5de5b0))(L,r); list_sound(L);
     tm_log2("status item",(s64)(L-g),r*10+c); return 1; }
   return 0; }
 // Inventory popup over the status sheet (A Inventory): two side-by-side lists G+0x5d068 (Items / Trade / Store All) and
@@ -372,7 +372,13 @@ static int header_tap(u64 g,float x,float y){
 static u64 prep_wheel(void){ u64 h=hud(); if(!h) return 0; u64 o=h+PREP_WHEEL; if(!mem_ok(o)||RD64(o)!=g_main+VT_PREP_WHEEL||!widget_vis(o)) return 0; return o; }
 static s32 prep_phase(void){ u64 b=battle(); if(!b||!hud()) return -1; return RDS32(b+0x3cc0); }
 static int pw_n, pw_t;   // wait for the wheel to settle on wedge pw_t, then press A
-static void prep_tick(void){ if(pw_n<=0) return; pw_n--; if(q_busy()) return; u64 o=prep_wheel(); if(!o){ pw_n=0; return; }
+static void prep_tick(void){
+#ifdef TM_DEBUG
+  { static s64 last=-1; u64 h=hud(), g=cmn_ui(); s32 ph=prep_phase(); if(h && g && ph>=28 && ph<=33){ u64 o=h+PREP_WHEEL, v=RD64(o+0x80);
+      s64 sig=(s64)ph*10000000+hand_on(g)*1000000+widget_vis(o)*100000+RDS32(o+0x88)*10000+RDS32(o+0x8c)*1000+(mem_ok(v)?RDS32(v+0x98)*10+(RD64(v+0xa8)!=0):0);
+      if(sig!=last){ last=sig; tm_log2("pw trace",(s64)g_poll,sig); } } }
+#endif
+  if(pw_n<=0) return; pw_n--; if(q_busy()) return; u64 o=prep_wheel(); if(!o){ pw_n=0; return; }
   if(RDS32(o+0x88)==2 && RDS32(o+0x8c)==pw_t){ press(BTN_A); pw_n=0; } }
 static const Prompt prep_wheel_prompts[]={ {955.f,1095.f,BTN_X}, {1135.f,1264.f,BTN_A} };
 static const Prompt prep_units_prompts[]={ {765.f,940.f,BTN_ZL}, {985.f,1090.f,BTN_X}, {1135.f,1264.f,BTN_RB} };
@@ -597,7 +603,8 @@ static int talk_tap(u64 g,float x,float y){
 // sheet: a navigation graph object at HUD+0x9ab60 (vt 0x19ee750): +0x10 current node, +0x30 byte = Details mode (X), +0x34 node
 // count, nodes of 0x30 bytes from +0x38 {list, up, down, left, right, flags}. The focused list has +8 bits 0x0c, G+0x58 = list.
 // Outside Details mode the hand sits on the right-hand list (Inventory / Combat Arts / Battalion page; page kind owner+0xfe0) and
-// picks rows there. Lists (HUD offsets): 0x7c7c8 top panel (house, battalion icon / Lv, Exp / HP, Mv / class, movement type),
+// picks rows there. Lists (HUD offsets): 0x7c7c8 top panel (house, battalion icon / Lv, Exp / HP, Mv / class, movement type and, with
+// a battalion's bonus, the Formation State icon at the portrait's corner),
 // 0x80d60 combat stats, 0x7e350 stats (4x2), 0x81948 abilities (one row of 9 columns, row index stays -1), 0x7ff70 skill levels
 // (moves with the page: its +0x30 = y origin, 1080p), 0x830b8 the right-hand list. Hit boxes are relative to each list's y origin
 // (+0x30 / 1.5), so they follow the layout. A tap moves the focus there directly (no d-pad walking); the game redraws the hand and
@@ -614,6 +621,7 @@ static const BdItem bd_items[]={
   {0x7c7c8,1,0, 40.f,135.f, 45.7f, 78.7f}, {0x7c7c8,1,1,136.f,330.f, 42.7f, 78.7f},
   {0x7c7c8,2,0, 40.f,195.f, 80.7f,112.7f}, {0x7c7c8,2,1,196.f,280.f, 80.7f,112.7f},
   {0x7c7c8,3,0, 40.f,280.f,113.7f,145.7f}, {0x7c7c8,3,1,281.f,330.f,113.7f,145.7f},
+  {0x7c7c8,3,2,331.f,394.f,105.f,155.f}, {0x7c7c8,3,2,395.f,460.f,105.f,145.7f},   // adjutant portrait, Formation State icon (column set below)
   {0x80d60,0,0, 35.f,172.f,  1.7f, 78.7f}, {0x80d60,0,1,173.f,313.f,  1.7f, 78.7f}, {0x80d60,0,2,314.f,455.f,  1.7f, 78.7f},
   {0x80d60,1,0, 35.f,172.f, 86.7f,118.f }, {0x80d60,1,1,173.f,313.f, 86.7f,118.f }, {0x80d60,1,2,314.f,455.f, 86.7f,118.f },
   {0x80d60,2,0, 35.f,172.f,118.7f,152.f }, {0x80d60,2,1,173.f,455.f,118.7f,152.f },
@@ -635,12 +643,12 @@ static int bdet_det_now(void){ u64 gr=bd_graph(); return gr && *(volatile u8*)(g
 static u64 bd_node_of(u64 gr,u64 L){ u32 n=RD32(gr+0x34); for(u32 k=0;k<n;k++){ u64 nd=gr+0x38+(u64)k*0x30; if(RD64(nd)==L) return nd; } return 0; }
 // the right-hand list: rows from the hand when it is there, else from the list's origin (Inventory page 0 / Combat Arts page 2 /
 // monster pages 4, 5)
-// Inventory page 0: after the two equipped rows the "Items" header, then a "Magic" header (52 px) before the first spell when items come
-// before it. The entries are u16 at +0x84 (inventory slots < 0x100, magic ids >= 0x100), as in the battle Items list (Dorothea: Fire,
+// Inventory page 0: after the two equipped rows the "Items" header, then a "Magic" header (52 px) before the first spell, also when there
+// are no items (an empty Items section is drawn: enemy Dark Bishop, Banshee / Circe Staff | Items | Magic: Miasma, Death). The entries are u16 at +0x84 (inventory slots < 0x100, magic ids >= 0x100), as in the battle Items list (Dorothea: Fire,
 // Iron Shield | Items: 4 | Magic: Thunder ...: taps on the spells landed a row or two off).
-static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){ if(page!=0 || r<3) return 0.f;
+static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){ if(page!=0 || r<2) return 0.f;
   int ms=-1; for(int i=2;i<cnt&&i<40;i++){ if(*(volatile u16*)(L+0x84+2*i)>=0x100){ ms=i; break; } }
-  return (ms>2 && r>=ms) ? 52.f : 0.f; }
+  return (ms>=2 && r>=ms) ? 52.f : 0.f; }
 // A scrolled list (s16 +0x6a > 0) moves its rows up by a distance that isn't stored (it stops at the end of the list: Annette's 9 rows
 // scroll 20.5 px), while page 0's two equipped rows stay put. It is measured from the hand on a scrolling row; with the hand elsewhere
 // (another panel) the row can't be placed: -2 (bdetail_tap moves the focus here first and replays the tap).
@@ -658,9 +666,6 @@ static int bd_inv_row(u64 g,u64 L,int foc,float x,float y){
 // two items (Battalion Level x 870, Exp x 1053). Returns the row, -1 for none.
 static int bd_bat_hit(u64 L,float x,float y,int*oc){ if(x<845.f||x>1215.f) return -1; float ry=y-RDF(L+0x30)/1.5f; *oc=0;
   if(ry>=58.f&&ry<94.f) return 0; if(ry>=94.f&&ry<131.f){ *oc= x>=1040.f; return 1; } if(ry>=131.f&&ry<166.f) return 2; return -1; }
-// the cursor sound: the list's vfunc +0x180, which the lists' own d-pad code calls when the row or column changes (main+0x5de0f0 /
-// 0x5de2e8; it plays SE 0x1b2 when list+0x60 is set). SetIndex doesn't play it.
-static void bd_sound(u64 L){ if(mem_ok(L) && RD64(L)) ((void(*)(u64))RD64(RD64(L)+0x180))(L); }
 static int bdetail_tap(u64 g,float x,float y){
   u64 gr=bd_graph(); if(!gr || !hand_on(g)) return 0; u64 h=hud(), o=RD64(g+G_HAND_OWNER); if(!bd_node_of(gr,o)) return 0;
   if(prompt_tap(x,y,bdetail_prompts,NP(bdetail_prompts))) return 1;
@@ -673,7 +678,7 @@ static int bdetail_tap(u64 g,float x,float y){
       else { int rr=bd_inv_row(g,inv,o==inv,x,y); if(rr>=0){ L=inv; r=rr; }
         else if(rr==-2){ if(rt_depth==0 && *(volatile u8*)(gr+0x30)){   // scrolled: hand onto the list first, then place the row from it
             if(mem_ok(o)) *(volatile u8*)(o+8)&=(u8)~0x0c; *(volatile u8*)(inv+8)|=0x0c;
-            *(volatile u64*)(g+G_HAND_OWNER)=inv; *(volatile u64*)(gr+0x10)=bd_node_of(gr,inv); bd_sound(inv);
+            *(volatile u64*)(g+G_HAND_OWNER)=inv; *(volatile u64*)(gr+0x10)=bd_node_of(gr,inv); list_sound(inv);
             retap_later(x,y,4); tm_log2("bdetail scrolled list",(s64)x,(s64)y); }
           return 1; } } } }
   // Status effects (gambit hit, stat debuffs ...): the top panel list gets an extra row 0 with one icon per status, drawn above the name
@@ -688,13 +693,16 @@ static int bdetail_tap(u64 g,float x,float y){
       int nc=*(volatile u8*)(W+0x53c+er); if(nc>=1 && nc<=13 && e->c>=nc) continue; }   // e.g. no battalion: one item in the crest row
     if(er>=0 && er>=RDS32(W+0x54)) continue; if(e->c>=RDS32(W+0x58) && e->c>0) continue;
     L=W; r=er; c=e->c;
+    // the class row after class / movement type: the adjutant (third, when there is one) and the Formation State icon (always last):
+    // Byleth with Ingrid 4 items, enemy Solon 3 (formation third)
+    if(e->off==0x7c7c8 && e->r==3 && e->x0>=395.f) c=*(volatile u8*)(W+0x53c+er)-1;
     // monsters: the HP row has 3 items (HP, the barrier gem, Mv) and the class row 3 (class, two movement icons)
-    if(e->off==0x7c7c8 && (e->r==2||e->r==3) && *(volatile u8*)(W+0x53c+er)==3){
+    if(e->off==0x7c7c8 && (e->r==2||e->r==3) && e->c<2 && *(volatile u8*)(W+0x53c+er-(e->r-2))==3 && *(volatile u8*)(W+0x53c+er)==3){
       c= e->r==2 ? (x<176.f?0: x<209.f?1:2) : (x<266.f?0: x<293.f?1:2); }
     break; }
   if(!L) return 1;
   if(!det){                                                    // outside Details: rows of the right-hand list as before, the rest opens Details first
-    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); bd_sound(L); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
+    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); list_sound(L); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
     if(rt_depth==0){ press(BTN_X); retap_later(x,y,60); rt_wait_det=2; tm_log2("bdetail details",(s64)x,(s64)y); }
     return 1; }
   if(L==o && (r<0 || RDS32(L+0x4c)==r) && RDS32(L+0x50)==c) return 1;   // already there
@@ -702,4 +710,4 @@ static int bdetail_tap(u64 g,float x,float y){
     *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(gr+0x10)=bd_node_of(gr,L); }
   if(RDS32(L+0x58)>1) set_col(L,c);
   if(r>=0) ((SetIdxFn)(g_main+0x5de5b0))(L,r);
-  bd_sound(L); g_learn_hold=20; tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }
+  list_sound(L); g_learn_hold=20; tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }

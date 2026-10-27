@@ -83,6 +83,10 @@ static void list_jump(u64 w,int it,int then_a){
 }
 // 2-D lists: main+0x5de6f0 is the column counterpart of SetIndex (stores +0x50, fixes the column scroll +0x68)
 static void set_col(u64 w,s32 c){ ((SetIdxFn)(g_main+0x5de6f0))(w,c); }
+// the cursor sound: the list's vfunc +0x180, which the lists' own d-pad code calls when the row or column changes (main+0x5de0f0 /
+// 0x5de2e8; it plays SE 0x1b2 when list+0x60 is set). SetIndex / set_col don't play it:
+// taps that move a selection with them alone, without a real button, call it.
+static void list_sound(u64 L){ if(mem_ok(L) && RD64(L)) ((void(*)(u64))RD64(RD64(L)+0x180))(L); }
 static void grid_jump(u64 w,int r,int c,int then_a){
   g_learn_hold=20;
   s32 idx=RDS32(w+0x4c), cidx=RDS32(w+0x50);
@@ -1033,12 +1037,14 @@ static int units_sort_tap(u64 o,float x,float y){
     if(t==p->name){ *(volatile s32*)(o+0x508)=t+1; q_push(BTN_L,2,4); } else { *(volatile s32*)(o+0x508)=t-1; q_push(BTN_R,2,4); }
     press(BTN_A); tm_log2("units sort",t,pg); return 1; }
   // a row while the hand is on the headers (e.g. right after sorting): Down from the headers always goes to the first row, so the
-  // header flag is cleared here, the row next to the target set (SetIndex) and one real Down (Up for the first row) lands on it;
-  // armed, so the next tap confirms. Rows 53.6 apart, row 0's middle at y 240.7 (the first visible row, +0x6a); outside the rows:
-  // Down, then the tap again.
+  // header flag is cleared here, the row next to the target set (SetIndex) and one real Down lands on it; armed, so the next tap
+  // confirms. The first row: Down alone (the header flag kept). It was SetIndex 1 + Up, but Up goes by the table's own row
+  // (+0x500 + +0x504, which SetIndex doesn't move): from row 0 it went back onto the headers (Enemy Units, Stats, sorted by Cha).
+  // Rows 53.6 apart, row 0's middle at y 240.7 (the first visible row, +0x6a); outside the rows: Down, then the tap again.
   if(hdr && y>170.f && y<=600.f){ s32 cnt=RDS32(o+0x54), top=(s32)(short)(RD32(o+0x68)>>16); float f=(y-240.7f)/53.6f; int t=top+(int)(f+(f>=0?0.5f:-0.5f));
-    if(cnt>1 && cnt<=60 && t>=0 && t<cnt){ *(volatile u8*)(o+0x710)=0; g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(o, t>0 ? t-1 : 1);
-      press(t>0?BTN_D:BTN_U); dt_arm(o+0x4c,t,0,0); tm_log2("units row from headers",t,top); return 1; }
+    if(cnt>1 && cnt<=60 && t>=0 && t<cnt){ g_learn_hold=20;
+      if(t>0){ *(volatile u8*)(o+0x710)=0; ((SetIdxFn)(g_main+0x5de5b0))(o,t-1); }
+      press(BTN_D); dt_arm(o+0x4c,t,0,0); tm_log2("units row from headers",t,top); return 1; }
     if(rt_depth==0){ press(BTN_D); retap_later(x,y,6); } return 1; }
   return 0; }
 static int prompt_bar_has(u64 g,u32 code);
@@ -1091,7 +1097,7 @@ static int hand_list_tap(u64 g,float x,float y){
   { int r,c; if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,&r,&c)){
     press(BTN_X); fz_set(g+0x26368,r,c,0); tm_log2("cert stat details",r,c); return 1; } }
   if(vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)){ int r,c;
-    if(cert_stat_at(x,y,&r,&c)){ g_learn_hold=20; if(RDS32(o+0x50)!=c) set_col(o,c); if(RDS32(o+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(o,r); tm_log2("cert stat",r,c); return 1; }
+    if(cert_stat_at(x,y,&r,&c)){ g_learn_hold=20; if(RDS32(o+0x50)!=c) set_col(o,c); if(RDS32(o+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(o,r); list_sound(o); tm_log2("cert stat",r,c); return 1; }
     if(inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); return 1; }               // "X Details": back to the class list
     if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){                                // the class list: B, then the tapped class (armed)
       u64 cl=g+0x25bc8; int t=-1; if(cert_cl_idx>=0 && RD64(cl)==g_main+0x1a1ee00){ float f=(y-cert_cl_hy)/53.33f; t=cert_cl_idx+(int)(f+(f>=0?0.5f:-0.5f)); if(t<0||t>=RDS32(cl+0x54)) t=-1; }
