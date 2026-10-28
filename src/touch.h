@@ -163,8 +163,10 @@ static void trade_set(u64 b,u64 unit){
   ((void(*)(u64,u64))RD64(vt+0x1a8))(w,unit);
   ((void(*)(u64,u32,u32,u32))RD64(vt+0xd0))(w,*(volatile u8*)(unit+0x87),0,1);
   ((void(*)(u64))(g_main+0x5dd530))(w); }
-// 1 = valid target (set when asked), 0 = not a target for this action, -1 = can't tell
-static int target_game(u64 b,u64 unit,int set){
+// 1 = valid target (set when asked), 0 = not a target for this action, -1 = can't tell. tx, ty: the tapped tile of a unit that
+// covers several tiles (monsters: each tile has its own forecast and status icons; with -1, -1 the game kept the anchor tile, so
+// they stayed on the first tap's tile), -1, -1 otherwise (as the d-pad passes them).
+static int target_game(u64 b,u64 unit,int set,s32 tx,s32 ty){
   u64 ctl=RD64(b+0x3bb8); if(!mem_ok(ctl) || RD64(ctl)!=g_main+0x19f5de0) return -1;
   s32 ss=RDS32(ctl+8), k=RDS32(b+0x3cdc);
   if(ss==14){ if(!trade_has(b,unit)) return 0; if(set) trade_set(b,unit); return 1; }
@@ -172,7 +174,10 @@ static int target_game(u64 b,u64 unit,int set){
   // take their targets from lists built elsewhere: there that function sets any unit without checking, so leave those to the cell flags.
   if(ss!=11 && ss!=5) return -1;
   if(k==2||k==8||k==23||k<0||k>0x1d) return -1;
-  return (((TgtFn)(g_main+0x181c90))(ctl,unit,(ss==5&&k==0xf)?0u:1u,0,(u32)set,-1,-1)&0xff)!=0; }
+  return (((TgtFn)(g_main+0x181c90))(ctl,unit,(ss==5&&k==0xf)?0u:1u,0,(u32)set,tx,ty)&0xff)!=0; }
+static int unit_multitile(u64 unit,int x,int y){   // a neighbouring cell holds the same unit (monsters: 2x2 and larger)
+  for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++){ if(!dx&&!dy) continue; u64 c=cell_at(x+dx,y+dy); if(c && RD64(c)==unit) return 1; }
+  return 0; }
 static int any_target_flag(u64 b){   // some tile of the map is highlighted as a target (cell byte +0x26 bit 0x20)
   int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24); if(maxx>32) maxx=32; if(maxy>32) maxy=32;
   for(int y=miny<0?0:miny;y<maxy;y++) for(int x=minx<0?0:minx;x<maxx;x++){ u64 c=cell_at(x,y); if(c && (*(volatile u8*)(c+0x26)&0x20)) return 1; }
@@ -180,7 +185,7 @@ static int any_target_flag(u64 b){   // some tile of the map is highlighted as a
 static int target_select(int x,int y){
   u64 b=battle(); u64 c=cell_at(x,y); if(!b||!c) return 0;
   u64 unit=RD64(c); g_tgt_known=0; if(!unit) return 0;
-  { int r=target_game(b,unit,1); if(r>=0) g_tgt_known=1;
+  { int mt=unit_multitile(unit,x,y); int r=target_game(b,unit,1,mt?x:-1,mt?y:-1); if(r>=0) g_tgt_known=1;
     if(r==1){ u64 ctl=RD64(b+0x3bb8); if(RDS32(ctl+8)!=14) set_cursor_instant(x,y); tm_log2("target game",x*100+y,RDS32(ctl+8)); return 1; }
     if(r==0){ tm_log2("not a target",x*100+y,0); return 0; } }
   if(!(*(volatile u8*)(c+0x26)&0x20)) return 0;   // not a highlighted target
