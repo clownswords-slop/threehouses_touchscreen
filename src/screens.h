@@ -377,6 +377,9 @@ static void prep_tick(void){
   { static s64 last=-1; u64 h=hud(), g=cmn_ui(); s32 ph=prep_phase(); if(h && g && ph>=28 && ph<=33){ u64 o=h+PREP_WHEEL, v=RD64(o+0x80);
       s64 sig=(s64)ph*10000000+hand_on(g)*1000000+widget_vis(o)*100000+RDS32(o+0x88)*10000+RDS32(o+0x8c)*1000+(mem_ok(v)?RDS32(v+0x98)*10+(RD64(v+0xa8)!=0):0);
       if(sig!=last){ last=sig; tm_log2("pw trace",(s64)g_poll,sig); } } }
+  if(g_ht_n>0){ static s64 hl=-1; u64 g=cmn_ui(); g_ht_n--; if(g){   // hand trace: x, y (1080p) and the owner's offset in the HUD / G
+      u64 o=RD64(g+0x58), h=hud(); s64 s=(s64)RDF(g+0x2c)*10000+(s64)RDF(g+0x30); if(s!=hl || g_ht_n==29){ hl=s;
+        tm_log2("hand trace",(s64)g_poll*1000000+(s64)(h&&o>h&&o<h+0x100000?o-h:o-g),s); } } }
 #endif
   if(pw_n<=0) return; pw_n--; if(q_busy()) return; u64 o=prep_wheel(); if(!o){ pw_n=0; return; }
   if(RDS32(o+0x88)==2 && RDS32(o+0x8c)==pw_t){ press(BTN_A); pw_n=0; } }
@@ -617,7 +620,7 @@ static float bd_row(int page,int r){ if(page==0) return r<2 ? 40.f*(float)r : 12
 #define BD_GRAPH 0x9ab60
 typedef struct { u32 off; signed char r,c; float x0,x1,y0,y1; } BdItem;   // y0/y1 relative to the list's y origin (720p)
 static const BdItem bd_items[]={
-  {0x7c7c8,0,0, 35.f,289.f,  5.7f, 42.7f}, {0x7c7c8,0,1,290.f,350.f,  5.7f, 45.7f},
+  {0x7c7c8,0,0, 35.f,350.f,  5.7f, 45.7f},   // house, then the crest icons (column set below)
   {0x7c7c8,1,0, 40.f,135.f, 45.7f, 78.7f}, {0x7c7c8,1,1,136.f,330.f, 42.7f, 78.7f},
   {0x7c7c8,2,0, 40.f,195.f, 80.7f,112.7f}, {0x7c7c8,2,1,196.f,280.f, 80.7f,112.7f},
   {0x7c7c8,3,0, 40.f,280.f,113.7f,145.7f}, {0x7c7c8,3,1,281.f,330.f,113.7f,145.7f},
@@ -693,6 +696,8 @@ static int bdetail_tap(u64 g,float x,float y){
       int nc=*(volatile u8*)(W+0x53c+er); if(nc>=1 && nc<=13 && e->c>=nc) continue; }   // e.g. no battalion: one item in the crest row
     if(er>=0 && er>=RDS32(W+0x54)) continue; if(e->c>=RDS32(W+0x58) && e->c>0) continue;
     L=W; r=er; c=e->c;
+    // the house row: the house, then one icon per crest, right-aligned (the last at x 314, 34 apart: Edelgard's two at 280 / 314)
+    if(e->off==0x7c7c8 && e->r==0){ int nc=*(volatile u8*)(W+0x53c+er); for(int i=1;i<nc && i<4;i++){ float cx=314.f-34.f*(float)(nc-1-i); if(x>=cx-17.f && x<cx+17.f) c=i; } }
     // the class row after class / movement type: the adjutant (third, when there is one) and the Formation State icon (always last):
     // Byleth with Ingrid 4 items, enemy Solon 3 (formation third)
     if(e->off==0x7c7c8 && e->r==3 && e->x0>=395.f) c=*(volatile u8*)(W+0x53c+er)-1;
@@ -701,13 +706,15 @@ static int bdetail_tap(u64 g,float x,float y){
       c= e->r==2 ? (x<176.f?0: x<209.f?1:2) : (x<266.f?0: x<293.f?1:2); }
     break; }
   if(!L) return 1;
-  if(!det){                                                    // outside Details: rows of the right-hand list as before, the rest opens Details first
-    if(L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); list_sound(L); } tm_log2("bdetail",r,0); return 1; }   // SetIndex alone: straight there
-    if(rt_depth==0){ press(BTN_X); retap_later(x,y,60); rt_wait_det=2; tm_log2("bdetail details",(s64)x,(s64)y); }
-    return 1; }
-  if(L==o && (r<0 || RDS32(L+0x4c)==r) && RDS32(L+0x50)==c) return 1;   // already there
+  if(!det && L==o && L==h+0x830b8 && !bpage){ if(r!=RDS32(L+0x4c)){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(L,r); list_sound(L); } tm_log2("bdetail",r,0); return 1; }   // outside Details, the right-hand rows: SetIndex alone, straight there
+  if(det && L==o && (r<0 || RDS32(L+0x4c)==r) && RDS32(L+0x50)==c) return 1;   // already there
   if(L!=o){ if(mem_ok(o)) *(volatile u8*)(o+8)&=(u8)~0x0c; *(volatile u8*)(L+8)|=0x0c;
     *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(gr+0x10)=bd_node_of(gr,L); }
   if(RDS32(L+0x58)>1) set_col(L,c);
   if(r>=0) ((SetIdxFn)(g_main+0x5de5b0))(L,r);
-  list_sound(L); g_learn_hold=20; tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }
+  g_learn_hold=20;
+  // outside Details the rest needs Details: the focus is moved there first (as above, which works outside Details too), then X opens
+  // Details right on it (was X, then the tap replayed once Details was up: the hand first showed on the old item, then glided over)
+  list_sound(L);
+  if(!det){ press(BTN_X); tm_log2("bdetail details",(s64)(L-h),r*10+c); return 1; }
+  tm_log2("bdetail item",(s64)(L-h),r*10+c); return 1; }

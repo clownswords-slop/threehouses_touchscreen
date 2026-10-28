@@ -19,6 +19,7 @@ static u64 g_poll;           // poll counter (primary npad)
 static u32 g_primary_id=0xffffffff;
 #ifdef TM_DEBUG
 static int tlog=1;
+static int g_ht_n;   // debug: polls left to log the hand after a tap ("hand trace", prep_tick)
 #else
 static int tlog=0;
 #endif
@@ -185,8 +186,12 @@ static int any_target_flag(u64 b){   // some tile of the map is highlighted as a
 static int target_select(int x,int y){
   u64 b=battle(); u64 c=cell_at(x,y); if(!b||!c) return 0;
   u64 unit=RD64(c); g_tgt_known=0; if(!unit) return 0;
-  { int mt=unit_multitile(unit,x,y); int r=target_game(b,unit,1,mt?x:-1,mt?y:-1); if(r>=0) g_tgt_known=1;
-    if(r==1){ u64 ctl=RD64(b+0x3bb8); if(RDS32(ctl+8)!=14) set_cursor_instant(x,y); tm_log2("target game",x*100+y,RDS32(ctl+8)); return 1; }
+  { u64 pu=RD64(b+0x3ce0); s32 px=RDS32(b+0x3ce8), py=RDS32(b+0x3cec);
+    int mt=unit_multitile(unit,x,y); int r=target_game(b,unit,1,mt?x:-1,mt?y:-1); if(r>=0) g_tgt_known=1;
+    if(r==1){ u64 ctl=RD64(b+0x3bb8); if(RDS32(ctl+8)!=14) set_cursor_instant(x,y);
+      // the cursor sound (SE 0x1b2, main+0x570100), which the d-pad's target step (main+0x180290) plays after a new target
+      if(RD64(b+0x3ce0)!=pu || RDS32(b+0x3ce8)!=px || RDS32(b+0x3cec)!=py) ((void(*)(void))(g_main+0x570100))();
+      tm_log2("target game",x*100+y,RDS32(ctl+8)); return 1; }
     if(r==0){ tm_log2("not a target",x*100+y,0); return 0; } }
   if(!(*(volatile u8*)(c+0x26)&0x20)) return 0;   // not a highlighted target
   *(volatile u64*)(b+0x3ce0)=unit; *(volatile u32*)(b+0x3ce8)=(u32)x; *(volatile u32*)(b+0x3cec)=(u32)y;
@@ -598,8 +603,9 @@ static void retap_later(float x,float y,int polls){ if(rt_depth>=2) return; rt_x
 static void retap_on_change(float x,float y,int polls){ u64 g=cmn_ui(); retap_later(x,y,polls); if(g) rt_own=RD64(g+0x58); }
 static float learned_pitch(u32 vt); static float learned_xpitch(u32 vt);
 static void rt_tick(void){ if(rt_n<=0) return;
-  // status sheet: replay the tap on the very poll Details mode comes up (the rest of the X press gap is not needed)
-  if(rt_wait_det && q_phase!=1 && qh==qt && rt_det_now()){ q_clear(); rt_n=1; }
+  // status sheet: replay the tap on the very poll Details mode comes up, also while X is still held (the rest of the press and its
+  // gap are not needed; waiting for them took ~7 frames, with the hand showing on the default item first)
+  if(rt_wait_det && rt_det_now()){ q_clear(); rt_n=1; }
   else if(q_busy()) return;
   // probe: replay the tap as soon as the step has taught us the pitch, instead of waiting out the full delay
   if(rt_probe_vt && (rt_probe_x ? learned_xpitch(rt_probe_vt) : learned_pitch(rt_probe_vt))>0.f) rt_n=1;
@@ -821,8 +827,8 @@ static const Seed seeds[]={
   {0x1a221c0, 0.f, 281.3f},    // quest Accept / Decline
   {0x1a43a68, 53.3f, 0.f},     // Support: support levels list
   {0x1a07bd8, 67.2f, 0.f},     // calendar menu
-  {0x1a20eb0, 34.67f, 0.f},    // Unit Appearance: options popup (Attire / In Battle)
-  {0x1a21070, 34.67f, 0.f},    // Unit Appearance: attire / in-battle lists
+  {0x1a20eb0, 34.67f, 0.f, -10.5f},  // Unit Appearance: options popup (Attire / In Battle; hand 185.3, row 0's middle 175)
+  {0x1a21070, 34.67f, 0.f, -10.5f},  // Unit Appearance: attire / in-battle lists (same: hand 185.3, War's middle 174.6)
   {0x1a21230, 34.67f, 0.f},    // Unit Appearance: attire variants (Servants Attire -> Classic / Custom)
   {0x1a24d78, 53.33f, 0.f},    // Goals: unit list
   {0x1a24f40, 34.67f, 0.f},    // Goals: focus list
@@ -850,7 +856,7 @@ static const Seed seeds[]={
   {0x1a1a4d0, 53.33f, 0.f},         // monastery map -> X Locate: People / Facilities list
   {0x1a22378, 34.67f, 0.f, 3.5f},   // pause menu -> Quests: quest list (hand 3.5 px above a row's middle)
   {0x1a483c8, 33.3f, 0.f, 3.2f},    // Storehouse: Sell / Cancel popup
-  {0x1a45588, 34.67f, 0.f},         // battle: item gained with a full inventory ("Select an item to send to the convoy"; G+0x4ef80)
+  {0x1a45588, 34.67f, 0.f, -10.5f}, // battle: item gained with a full inventory ("Select an item to send to the convoy"; G+0x4ef80; hand 10.5 px below a row's middle: 381.3 / 371 on row 2, 520 / 509 on row 6)
   {0x1a44a48, 34.67f, 0.f, 11.8f},  // calendar -> Battle: Battlefield mission list (hand 11.8 px above a row's middle)
   {0x1a1e648, 53.33f, 0.f, -3.7f},  // calendar -> Seminar: lecturer list (hand 3.7 px below a row's middle)
   {0x19ed970, 34.67f, 0.f, -2.5f},  // battle map menu -> Auto-Battle: Charge / Focus / Fall Back / Unite (hand 2.5 px below a row's middle)
@@ -870,13 +876,15 @@ static float learned_xpitch(u32 vt){ Learn*l=lrn_get(vt,0); if(l&&l->xpitch>0.f)
 static void set_pitch(u32 vt,float p){ Learn*l=lrn_get(vt,1); if(l) l->pitch=p; }
 static void set_xpitch(u32 vt,float p){ Learn*l=lrn_get(vt,1); if(l) l->xpitch=p; }
 static int list_col(u64 w){ return RDS32(w+0x50)-(s32)(short)(RD32(w+0x68)&0xffff); } // visible column of the selection
-static u64 li_w; static int li_row, li_col, li_stable, li_hrow, li_hcol; static float li_x, li_y, li_hx, li_hy;
+static u64 li_w; static int li_row, li_col, li_stable, li_hrow, li_hcol, li_hidx; static float li_x, li_y, li_hx, li_hy;
 // Where visible row 0 of the active list sits (hand y, 720p), taken whenever the hand has settled. A tap that arrives while the hand
 // is still gliding to a newly selected row (e.g. the second tap of a quick double tap) is placed with it instead of the moving hand,
 // which put it a row off (it selected the next row instead of confirming). Kept only while that list stays the active one.
-static u64 g_r0_w; static float g_r0_y;
+// The previous list's is kept too (g_r0p): a Yes / No box over the list takes the hand and, once closed, leaves it there (see
+// hand_list_tap), and the list's own position was gone by then.
+static u64 g_r0_w, g_r0p_w; static float g_r0_y, g_r0p_y;
 static void learn_feed(u64 w,float ix,float iy){ // once per poll: the active list and its indicator x,y (720p), or w=0
-  if(w!=g_r0_w) g_r0_w=0;
+  if(w!=g_r0_w){ if(g_r0_w){ g_r0p_w=g_r0_w; g_r0p_y=g_r0_y; } g_r0_w=0; }
   if(!w){ li_w=0; return; }
   if(g_learn_hold>0){ g_learn_hold--; li_w=0; return; }   // restart from a fresh baseline afterwards
   int row=list_row(w), col=list_col(w);
@@ -885,11 +893,13 @@ static void learn_feed(u64 w,float ix,float iy){ // once per poll: the active li
   if(++li_stable!=4) return;           // indicator settled for 4 polls
   u32 vt=(u32)(RD64(w)-g_main);
   { float p=learned_pitch(vt); if(p>0.f && RDS32(w+0x58)<=1){ g_r0_w=w; g_r0_y=iy-(float)row*p; } }   // 1-D lists only
-  if(li_hrow!=-99999 && row!=li_hrow && col==li_hcol){ float p=(iy-li_hy)/(float)(row-li_hrow);
+  // not from a row -1 (Certifications / Reclass "Current Class" sits a header above row 0: the pitch was learned as 86.6 / 75.5
+  // instead of 53.33, so the class rows were tapped a row short)
+  if(li_hrow!=-99999 && row!=li_hrow && col==li_hcol && RDS32(w+0x4c)>=0 && li_hidx>=0){ float p=(iy-li_hy)/(float)(row-li_hrow);
     if(p>15.f&&p<200.f){ set_pitch(vt,p); tm_log2("learned pitch x10",(s64)(p*10.f),(s64)vt); } }
   if(li_hrow!=-99999 && col!=li_hcol && row==li_hrow){ float p=(ix-li_hx)/(float)(col-li_hcol);
     if(p>15.f&&p<700.f){ set_xpitch(vt,p); tm_log2("learned xpitch x10",(s64)(p*10.f),(s64)vt); } }
-  li_hrow=row; li_hcol=col; li_hx=ix; li_hy=iy;
+  li_hrow=row; li_hcol=col; li_hx=ix; li_hy=iy; li_hidx=RDS32(w+0x4c);
 }
 // Lists without the pointing hand: the selected row is marked by a highlight whose target position is known.
 // {list widget offset in G, its vtable, offset in G of the highlight's target x,y (1080p), default pitch, x range}
@@ -971,6 +981,8 @@ static void ab_tick(void){
 static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return 0;
   int batt= vt==0x1a40630, abil= vt==0x1a40300, arts= vt==0x1a40498;
+  // L / R (previous / next unit) on the unit's name bar: Abilities / Combat Arts x 175-260 / 490-580, y 107-134
+  if(!batt && y>=100.f&&y<=142.f){ if(x>=170.f&&x<=265.f){ press(BTN_LB); tm_log2("arts unit",-1,0); return 1; } if(x>=485.f&&x<=585.f){ press(BTN_RB); tm_log2("arts unit",1,0); return 1; } }
   if(batt){ if(y>=88.f&&y<=128.f){ if(x>=35.f&&x<=120.f){ press(BTN_LB); return 1; } if(x>=380.f&&x<=470.f){ press(BTN_RB); return 1; } }
     if(inbox(x,y,960.f,1250.f,42.f,82.f)){ press(BTN_X); return 1; } }
   if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("abilities details",0,0); return 1; }   // "X Details" in the corner
@@ -1080,6 +1092,27 @@ static const float cert_row_y[5]={219.3f,264.f,297.3f,330.7f,364.f};
 static int cert_stat_at(float x,float y,int*r,int*c){ if(x<860.f||x>1235.f) return 0; int b=-1; float bd=1e9f;
   for(int i=0;i<5;i++){ float d=y-cert_row_y[i]; if(d<0) d=-d; if(d<bd){ bd=d; b=i; } } if(bd>18.f) return 0;
   if(r) *r=b; if(c) *c= x>=1038.f; return 1; }
+// ... and its Class Abilities list under the grid (G+0x268f0, vt 0x1a0dd50, one column; Down from Spd / Cha reaches it): rows at
+// y 497.7 + 34.67 r (720p), x 880-1100, fixed like the grid's (its +0x30 read 709 on Reclass but 761 on Certifications with the rows
+// drawn at the same place: Mage's Fire, Warlock's two, Fortress Knight's Axefaire / Weight -5). The grid and this list are the two nodes of a navigation graph at G+0x26e70
+// (vt 0x19ee750, as on the battle unit details: +0x10 current node, +0x34 node count, nodes of 0x30 from +0x38 {list, up, down, ...});
+// a focus move is the focus bits (+8 & 0x0c), the hand owner G+0x58 and that current node (G+0x58 alone: the d-pad still went from
+// the old node, Up did nothing).
+#define CERT_AB 0x268f0
+#define CERT_NAV 0x26e70
+// Its row count (+0x54) stays 0 until the hand has been in it once (Swordmaster's two abilities: count 0), so with 0 up to 3 rows count.
+static int cert_ab_at(u64 g,float x,float y){ u64 A=g+CERT_AB; if(!is_widget(A,0x1a0dd50) || x<880.f || x>1100.f) return -1;
+  s32 n=RDS32(A+0x54); if(n==0) n=3; if(n<1||n>10) return -1; float f=(y-497.7f)/34.67f; int r=(int)(f+(f>=0?0.5f:-0.5f));
+  return (r>=0 && r<n) ? r : -1; }
+static int cert_focus(u64 g,u64 L){ u64 F=g+CERT_NAV; if(!mem_ok(F) || RD64(F)!=g_main+0x19ee750) return 0; u32 n=RD32(F+0x34); if(n<1||n>8) return 0;
+  for(u32 k=0;k<n;k++){ u64 nd=F+0x38+(u64)k*0x30; if(RD64(nd)!=L) continue;
+    u64 o=RD64(g+G_HAND_OWNER); if(o!=L){ if(mem_ok(o)) *(volatile u8*)(o+8)&=(u8)~0x0c; *(volatile u8*)(L+8)|=0x0c; *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(F+0x10)=nd; }
+    return 1; }
+  return 0; }
+// "X Status" / "X Details": left of "R Rotate" on Certifications (x 990-1110); alone in the corner on Reclass (prompt bar count 1)
+static int prompt_bar_has(u64 g,u32 code);
+static int cert_x_at(u64 g,float x,float y){ if(RDS32(g+0x118)==1 && prompt_bar_has(g,0x1000)) return inbox(x,y,1150.f,1264.f,682.f,718.f);
+  return inbox(x,y,990.f,1110.f,682.f,718.f); }
 static int hand_list_tap(u64 g,float x,float y){
   // a Yes / No box (G+0xe00) that just closed: the game leaves the hand off and G+0x58 on the box until the hand moves (Instruct: No on
   // "You still have sessions remaining. Do you want to stop?"), so the tap fell through to A and confirmed the skill still selected; the
@@ -1101,15 +1134,33 @@ static int hand_list_tap(u64 g,float x,float y){
   // stat's breakdown. A tap on a stat: X, then the stat the moment the grid has the hand; with the hand on the grid: that stat.
   { int r,c; if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,&r,&c)){
     press(BTN_X); fz_set(g+0x26368,r,c,0); tm_log2("cert stat details",r,c); return 1; } }
-  if(vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)){ int r,c;
-    if(cert_stat_at(x,y,&r,&c)){ g_learn_hold=20; if(RDS32(o+0x50)!=c) set_col(o,c); if(RDS32(o+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(o,r); list_sound(o); tm_log2("cert stat",r,c); return 1; }
-    if(inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); return 1; }               // "X Details": back to the class list
+  // a class ability from the class list: X (the grid takes the hand), then the tap again
+  if(vt==0x1a1ee00 && RDS32(g+0x26350)==1 && cert_ab_at(g,x,y)>=0){ if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,30); tm_log2("cert ability details",0,0); } return 1; }
+  if((vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)) || (vt==0x1a0dd50 && o==g+CERT_AB && widget_vis(o))){ int r,c;
+    int ar=cert_ab_at(g,x,y); u64 A=g+CERT_AB;
+    // not filled in yet (count 0): the grid's last row and one real Down, which takes the hand into the list (and fills it), then the
+    // row the moment the list has the hand (fz)
+    if(ar>=0 && RDS32(A+0x54)==0){ u64 S=g+0x26368; if(o!=S) return 1; g_learn_hold=20; if(RDS32(S+0x4c)!=4) ((SetIdxFn)(g_main+0x5de5b0))(S,4);
+      press(BTN_D); fz_set(A,ar,-1,0); tm_log2("cert ability via down",ar,0); return 1; }
+    if(ar>=0 && ar<RDS32(A+0x54) && cert_focus(g,A)){ g_learn_hold=20; if(RDS32(A+0x4c)!=ar) ((SetIdxFn)(g_main+0x5de5b0))(A,ar); list_sound(A); tm_log2("cert ability",ar,0); return 1; }
+    if(cert_stat_at(x,y,&r,&c)){ u64 S=g+0x26368; if(!cert_focus(g,S)) return 1;
+      g_learn_hold=20; if(RDS32(S+0x50)!=c) set_col(S,c); if(RDS32(S+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(S,r); list_sound(S); tm_log2("cert stat",r,c); return 1; }
+    if(cert_x_at(g,x,y)){ press(BTN_X); return 1; }                                   // "X Details": back to the class list
     if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){                                // the class list: B, then the tapped class (armed)
       u64 cl=g+0x25bc8; int t=-1; if(cert_cl_idx>=0 && RD64(cl)==g_main+0x1a1ee00){ float f=(y-cert_cl_hy)/53.33f; t=cert_cl_idx+(int)(f+(f>=0?0.5f:-0.5f)); if(t<0||t>=RDS32(cl+0x54)) t=-1; }
       press(BTN_B); if(t>=0) fz_set(cl,t,-1,1); tm_log2("cert class from stats",t,0); return 1; }
     return 1; }
   // Certifications / Reclass class list: "X Status" ("X Details" on the Stat Changes page) left of "R Rotate", outside the list's range
-  if(vt==0x1a1ee00 && inbox(x,y,990.f,1110.f,682.f,718.f)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
+  if(vt==0x1a1ee00 && cert_x_at(g,x,y)){ press(BTN_X); tm_log2("class list X",0,0); return 1; }
+  // Certifications / Reclass class list: "Current Class" is the list's row -1 (y 182-224; SetIndex refuses -1, the index is written
+  // directly: hand and panel follow, tested). With the hand there, the rows aren't placed from the hand (generic list: index -1, so
+  // nothing happened): the first visible row (+0x6a) is at y 322.6, 53.33 apart (one tier shown: Advanced / Intermediate ...); a tap
+  // selects (SetIndex), the next tap on it confirms.
+  if(vt==0x1a1ee00 && o==g+0x25bc8 && x>=40.f && x<=360.f){ s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54);
+    if(y>=182.f && y<=224.f){ if(idx!=-1){ *(volatile s32*)(o+0x4c)=-1; list_sound(o); } tm_log2("current class",idx,0); return 1; }
+    if(idx==-1 && y>=295.f && y<=650.f && cnt>0 && cnt<=60){ s32 top=(s32)(short)*(volatile u16*)(o+0x6a), vis=(s32)(short)*(volatile u16*)(o+0x66);
+      int k=(int)((y-322.6f)/53.33f+0.5f); if(k<0 || (vis>0 && k>=vis) || top+k>=cnt) return 1; k+=top;
+      g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(o,k); list_sound(o); dt_arm(o+0x4c,k,0,0); tm_log2("class from current",k,top); return 1; } }
   // ... and the ZL / ZR arrows on its description panel (Class Description / Stat Changes / ...)
   if(vt==0x1a1ee00 && y>=150.f && y<=192.f){ if(x>=840.f&&x<=925.f){ press(BTN_ZL); return 1; } if(x>=1140.f&&x<=1230.f){ press(BTN_ZR); return 1; } }
   // Tournament organizer unit list: ZL / ZR arrows on the tournament panel (details / opponents page), right of the list's tap range
@@ -1200,7 +1251,7 @@ static int hand_list_tap(u64 g,float x,float y){
       float g2=(x-(hx-45.f))/xp; int dc=(int)(g2+100.f)-100;
       int r=idx+dr, c=cidx+dc; if(r<0||r>=cnt||c<0||c>=ccnt) return 1;
       grid_pick(o,r,c); tm_log2("grid",r*100+c,(s64)vt); return 1; }
-    if(x<hx-60.f || x>hx+760.f) return 1;
+    if(!yn_closed && (x<hx-60.f || x>hx+760.f)) return 1;   // (after a closed Yes / No the hand still points at the box)
     float pitch=learned_pitch((u32)vt);
     if(pitch<=0.f){
       // unknown list: take one step so the hand shows the row pitch, then replay the tap. Not for a tap on the selected row
@@ -1211,9 +1262,11 @@ static int hand_list_tap(u64 g,float x,float y){
       pitch=40.f; }
     float yoff=0.f; { const Seed*sd=seed_get((u32)vt); if(sd) yoff=sd->yoff; } hy+=yoff;
     float f=(y-hy)/pitch; int d=(int)(f+(f>=0?0.5f:-0.5f));
-    if(!(li_w==o && li_stable>=4) && g_r0_w==o){   // the hand is still moving: place the tap from the settled row-0 position
-      float fr=(y-(g_r0_y+yoff))/pitch; int r=(int)(fr+(fr>=0?0.5f:-0.5f)); int top=(s32)(short)(RD32(o+0x68)>>16);
+    if(!(li_w==o && li_stable>=4) && (g_r0_w==o || (yn_closed && g_r0p_w==o))){   // the hand is still moving / on a closed Yes / No:
+      float r0= g_r0_w==o ? g_r0_y : g_r0p_y;                                        // place the tap from the settled row-0 position
+      float fr=(y-(r0+yoff))/pitch; int r=(int)(fr+(fr>=0?0.5f:-0.5f)); int top=(s32)(short)(RD32(o+0x68)>>16);
       d=top+r-idx; tm_log2("list moving",d,(s64)vt); }
+    else if(yn_closed){ tm_log2("list after yes/no: no row position",0,(s64)vt); return 1; }
     if(idx+d<0||idx+d>=cnt) return 1;
     if(popup_list((u32)vt)){ g_learn_hold=20; if(d) ((SetIdxFn)(g_main+0x5de5b0))(o,idx+d); q_push(0,1,0); press(BTN_A); }
     else if(single_tap_list((u32)vt)) list_jump(o,idx+d,1); else list_pick(o,idx+d);
@@ -1350,6 +1403,9 @@ static int freeroam_corner_tap(u64 g,float x,float y){
 static void on_tap(float x,float y){
   u64 b=battle(); s32 phase= b? RDS32(b+0x3cc0) : -1;
   if(tlog){ Buf bb={0}; bstr(&bb,"[touchmod] tap "); bint(&bb,(s64)x); bput(&bb,','); bint(&bb,(s64)y); bstr(&bb," phase="); bint(&bb,phase); bflush(&bb); }
+#ifdef TM_DEBUG
+  g_ht_n=30;
+#endif
   if(yesno_tap(x,y)) return;
   // message box (G+0x120, vt 0x1a42b98: "Sold ... x 1", "not enough points" ...): the hand underneath keeps its owner, so the list
   // handlers would swallow the tap; any tap closes the box (A)
