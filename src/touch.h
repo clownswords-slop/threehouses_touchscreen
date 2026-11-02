@@ -1020,10 +1020,12 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
 static int popup_list(u32 vt){ return vt==0x1a25c88 || vt==0x1a483c8 || vt==0x1a42478 || vt==0x1a42808; }   // + Unequip / Trade, Equip / Trade   // + Storehouse Sell / Cancel   // small confirm popups (shop Buy / Cancel, ...): one tap, no stop on the rows between
 static int single_tap_list(u32 vt){ return popup_list(vt) || vt==0x1a1db48 || vt==0x1a0eaf0 || vt==0x19ee290 || vt==0x1a3be68 || vt==0x1a083f0 || vt==0x1a20eb0 || vt==0x1a07bd8 || vt==0x19f0e48 || vt==0x19ed970; }   // 0x19f0e48: prep wheel System -> Options / Guide
 // Recent hand owners. Some screens leave G+0x58 empty after a message box closes (shop: "Sent ... to the convoy") until the
-// hand moves; the list under the hand is then the most recent owner that is still a visible list.
+// hand moves; the list under the hand is then the most recent owner that is still a visible list. Each owner is kept once (moved to
+// the front): selling item stacks alternates the Sell / Cancel popup and the quantity dialog, which pushed the shop list out.
 static u64 own_hist[4];
 static void own_track(void){ u64 g=cmn_ui(); if(!g || !hand_on(g)) return; u64 o=RD64(g+G_HAND_OWNER); if(!o || o==own_hist[0]) return;
-  for(int i=3;i>0;i--) own_hist[i]=own_hist[i-1]; own_hist[0]=o; }
+  int i=3; for(int k=1;k<4;k++) if(own_hist[k]==o){ i=k; break; }
+  for(;i>0;i--) own_hist[i]=own_hist[i-1]; own_hist[0]=o; }
 static u64 own_fallback(void){ for(int i=0;i<4;i++){ u64 o=own_hist[i]; if(o && is_list(o) && widget_vis(o)) return o; } return 0; }
 // Units / Unit Info table (vt 0x1a436f8): Up from the first row puts the hand on the column headers, Left / Right walk the
 // columns (crossing into the next page), A sorts by the column (again = the other way round). owner+0x710 (byte) = 1 while the hand

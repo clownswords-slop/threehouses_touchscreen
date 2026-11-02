@@ -649,7 +649,14 @@ static u64 bd_node_of(u64 gr,u64 L){ u32 n=RD32(gr+0x34); for(u32 k=0;k<n;k++){ 
 // Inventory page 0: after the two equipped rows the "Items" header, then a "Magic" header (52 px) before the first spell, also when there
 // are no items (an empty Items section is drawn: enemy Dark Bishop, Banshee / Circe Staff | Items | Magic: Miasma, Death). The entries are u16 at +0x84 (inventory slots < 0x100, magic ids >= 0x100), as in the battle Items list (Dorothea: Fire,
 // Iron Shield | Items: 4 | Magic: Thunder ...: taps on the spells landed a row or two off).
-static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){ if(page!=0 || r<2) return 0.f;
+// Monster page 4: bd_row has one Barrier Ability row; a second one (Golem: Vital Defense, Anti-Magic Armor) is row 3, right under the first
+// instead of 52.6 px lower under the Latent Abilities header, and the Latent rows then have the same y by index. The abilities are the
+// bytes +0x44 / +0x45 of main+0x40e060(unit) (read-only lookup; 0xff / 0xf0 = none; unit = list+0x6ac8), as in the game's own row code.
+static int bd_ab_set(u32 b){ return b!=0xff && b!=0xf0; }
+static float bd_row_ex(u64 L,s32 page,s32 cnt,int r){
+  if(page==4){ if(r!=3) return 0.f; u64 u=RD64(L+0x6ac8); if(!mem_ok(u)) return 0.f; u64 d=((u64(*)(u64))(g_main+0x40e060))(u);
+    return (mem_ok(d) && bd_ab_set(*(volatile u8*)(d+0x44)) && bd_ab_set(*(volatile u8*)(d+0x45))) ? -52.6f : 0.f; }
+  if(page!=0 || r<2) return 0.f;
   int ms=-1; for(int i=2;i<cnt&&i<40;i++){ if(*(volatile u16*)(L+0x84+2*i)>=0x100){ ms=i; break; } }
   return (ms>=2 && r>=ms) ? 52.f : 0.f; }
 // A scrolled list (s16 +0x6a > 0) moves its rows up by a distance that isn't stored (it stops at the end of the list: Annette's 9 rows
