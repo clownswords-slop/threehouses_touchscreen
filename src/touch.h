@@ -823,7 +823,7 @@ static const Seed seeds[]={
   {0x1a1db48, 111.3f, 0.f},    // lecture: answers to a student's question
   {0x1a0eaf0, 148.2f, 0.f},    // lecture: Group Tasks
   {0x1a1f768, 53.33f, 0.f},    // Group Tasks: unit list
-  {0x1a1ba18, 34.67f, 0.f},    // Cooking Together: recipes
+  {0x1a1ba18, 34.67f, 0.f, 11.8f},   // Cooking Together: recipes (hand 11.8 above the row middle: y 200.7 on row 1, middle 212.5)
   {0x1a221c0, 0.f, 281.3f},    // quest Accept / Decline
   {0x1a43a68, 53.3f, 0.f},     // Support: support levels list
   {0x1a07bd8, 67.2f, 0.f},     // calendar menu
@@ -1098,8 +1098,10 @@ static int cert_stat_at(float x,float y,int*r,int*c){ if(x<860.f||x>1235.f) retu
 // y 497.7 + 34.67 r (720p), x 880-1100, fixed like the grid's (its +0x30 read 709 on Reclass but 761 on Certifications with the rows
 // drawn at the same place: Mage's Fire, Warlock's two, Fortress Knight's Axefaire / Weight -5). The grid and this list are the two nodes of a navigation graph at G+0x26e70
 // (vt 0x19ee750, as on the battle unit details: +0x10 current node, +0x34 node count, nodes of 0x30 from +0x38 {list, up, down, ...});
-// a focus move is the focus bits (+8 & 0x0c), the hand owner G+0x58 and that current node (G+0x58 alone: the d-pad still went from
-// the old node, Up did nothing).
+// a focus move is done as the graph's own (main+0x1277a0): the old list's bits +8 & 0x3c off and 0x30 on, the new list's 0x3c on, and
+// the current node (without the node the d-pad still went from the old one). The game then sets the hand owner G+0x58 itself and
+// draws the hand on the new list's row; writing G+0x58 as well hid the change from it, so the hand only moved when the row changed
+// too (a tap on the ability the list already had selected left the hand on the grid).
 #define CERT_AB 0x268f0
 #define CERT_NAV 0x26e70
 // Its row count (+0x54) stays 0 until the hand has been in it once (Swordmaster's two abilities: count 0), so with 0 up to 3 rows count.
@@ -1108,7 +1110,8 @@ static int cert_ab_at(u64 g,float x,float y){ u64 A=g+CERT_AB; if(!is_widget(A,0
   return (r>=0 && r<n) ? r : -1; }
 static int cert_focus(u64 g,u64 L){ u64 F=g+CERT_NAV; if(!mem_ok(F) || RD64(F)!=g_main+0x19ee750) return 0; u32 n=RD32(F+0x34); if(n<1||n>8) return 0;
   for(u32 k=0;k<n;k++){ u64 nd=F+0x38+(u64)k*0x30; if(RD64(nd)!=L) continue;
-    u64 o=RD64(g+G_HAND_OWNER); if(o!=L){ if(mem_ok(o)) *(volatile u8*)(o+8)&=(u8)~0x0c; *(volatile u8*)(L+8)|=0x0c; *(volatile u64*)(g+G_HAND_OWNER)=L; *(volatile u64*)(F+0x10)=nd; }
+    u64 cn=RD64(F+0x10), o= mem_ok(cn) ? RD64(cn) : 0;
+    if(o!=L){ if(mem_ok(o)) *(volatile u8*)(o+8)=(u8)((*(volatile u8*)(o+8)&~0x3c)|0x30); *(volatile u8*)(L+8)|=0x3c; *(volatile u64*)(F+0x10)=nd; }
     return 1; }
   return 0; }
 // "X Status" / "X Details": left of "R Rotate" on Certifications (x 990-1110); alone in the corner on Reclass (prompt bar count 1)
@@ -1136,15 +1139,15 @@ static int hand_list_tap(u64 g,float x,float y){
   // stat's breakdown. A tap on a stat: X, then the stat the moment the grid has the hand; with the hand on the grid: that stat.
   { int r,c; if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,&r,&c)){
     press(BTN_X); fz_set(g+0x26368,r,c,0); tm_log2("cert stat details",r,c); return 1; } }
-  // a class ability from the class list: X (the grid takes the hand), then the tap again
-  if(vt==0x1a1ee00 && RDS32(g+0x26350)==1 && cert_ab_at(g,x,y)>=0){ if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,30); tm_log2("cert ability details",0,0); } return 1; }
+  // a class ability from the class list: X (Details: the grid takes the hand on HP), then the tap again the poll the grid has it, which
+  // moves the focus on to the ability (X sets up the grid's node and focus when pressed, before that: the move isn't undone)
+  if(vt==0x1a1ee00 && RDS32(g+0x26350)==1 && cert_ab_at(g,x,y)>=0){ if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,40); tm_log2("cert ability details",0,0); } return 1; }
   if((vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)) || (vt==0x1a0dd50 && o==g+CERT_AB && widget_vis(o))){ int r,c;
     int ar=cert_ab_at(g,x,y); u64 A=g+CERT_AB;
-    // not filled in yet (count 0): the grid's last row and one real Down, which takes the hand into the list (and fills it), then the
-    // row the moment the list has the hand (fz)
-    if(ar>=0 && RDS32(A+0x54)==0){ u64 S=g+0x26368; if(o!=S) return 1; g_learn_hold=20; if(RDS32(S+0x4c)!=4) ((SetIdxFn)(g_main+0x5de5b0))(S,4);
-      press(BTN_D); fz_set(A,ar,-1,0); tm_log2("cert ability via down",ar,0); return 1; }
-    if(ar>=0 && ar<RDS32(A+0x54) && cert_focus(g,A)){ g_learn_hold=20; if(RDS32(A+0x4c)!=ar) ((SetIdxFn)(g_main+0x5de5b0))(A,ar); list_sound(A); tm_log2("cert ability",ar,0); return 1; }
+    // the list's count stays 0 until it has had the focus once: then the row is set the poll the game has made it the hand owner (fz)
+    if(ar>=0 && cert_focus(g,A)){ g_learn_hold=20; s32 n=RDS32(A+0x54);
+      if(n>ar){ if(RDS32(A+0x4c)!=ar) ((SetIdxFn)(g_main+0x5de5b0))(A,ar); } else fz_set(A,ar,-1,0);
+      list_sound(A); tm_log2("cert ability",ar,n); return 1; }
     if(cert_stat_at(x,y,&r,&c)){ u64 S=g+0x26368; if(!cert_focus(g,S)) return 1;
       g_learn_hold=20; if(RDS32(S+0x50)!=c) set_col(S,c); if(RDS32(S+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(S,r); list_sound(S); tm_log2("cert stat",r,c); return 1; }
     if(cert_x_at(g,x,y)){ press(BTN_X); return 1; }                                   // "X Details": back to the class list
