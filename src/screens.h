@@ -576,6 +576,16 @@ static int screens_tap(u64 g,float x,float y){
 static int talk_open(u64 g){ return is_widget(g+G_TALKWIN,0x1a2e688) || is_widget(g+G_EVTWIN,0x1a2edb0) || is_widget(g+0xf243c,0x1a2edb0) || is_widget(g+0x1a28,0x1a2edb0); }
 static u64 log_own; static int log_arm;   // dialogue Log: tap-selected entry (the next tap on it replays the voice)
 static const Prompt talk_prompts[]={ {938.f,1025.f,BTN_ZL}, {1079.f,1264.f,BTN_X} };
+// Unit preview (first monastery day: a student's stats sheet with "X Swap display  A Ask again  B Back", between the lines in which
+// Edelgard / Dimitri / Claude describes them): no hand and no talk window shown (all talk windows vis 0), so no handler took the taps.
+// Known by the prompt bar: exactly B (0x4000), A (0x2000), X (0x1000), and the label of the middle one (pointers at G+0xa0 / +0xa8 /
+// +0xb0) reading "Ask again". The bar alone isn't enough: it still read B / A / X at the start of the next line, with the talk window
+// up (taps there must go on advancing the text). The prompts are tappable; other taps do nothing.
+static const Prompt preview_prompts[]={ {800.f,945.f,BTN_X}, {993.f,1116.f,BTN_A}, {1169.f,1264.f,BTN_B} };
+static int preview_tap(u64 g,float x,float y){
+  if(hand_on(g) || talk_open(g) || RDS32(g+0x118)!=3 || RD32(g+0xf0)!=0x4000 || RD32(g+0xf4)!=0x2000 || RD32(g+0xf8)!=0x1000) return 0;
+  u64 l=RD64(g+0xa8); if(!mem_ok(l)) return 0; const char*t="Ask again"; for(int k=0;k<10;k++) if(*(volatile char*)(l+k)!=t[k]) return 0;
+  prompt_tap(x,y,preview_prompts,NP(preview_prompts)); return 1; }
 static int talk_tap(u64 g,float x,float y){
   if(hand_on(g)){ u64 vt=hand_owner_vt(g,0);
     if(vt==0x1a3c630){ if(inbox(x,y,900.f,1264.f,682.f,718.f)){ press(BTN_B); return 1; }   // Log: the prompt row closes it

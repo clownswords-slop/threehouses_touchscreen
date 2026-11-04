@@ -673,6 +673,13 @@ static void tm_log2(const char*m,s64 a,s64 b){ if(!tlog) return; Buf bb={0}; bst
 #define CV_TOP  0x111e4  // first visible convoy row of the current tab (+0x111e0 keeps an older value across tab changes)
 static float cv_row_y(u64 g){ // 720p centre of the currently highlighted convoy row, from the hand cursor
   u64 hd=g+CV_HAND; if(RD64(hd)!=g_main+0x19edb28) return -1.f; return RDF(hd+0x30)/1.5f-21.4f; }
+// unit item list rows: the item slots (6), then the Magic header and the unit's spells (rows 6..; the hand goes there too). Row r is
+// at 286.6 + p(r) - p(top) with p(r) = 34.67 r + 51.9 past the header and top = the first visible row (u16 +0x6a; the list scrolls a row
+// at a time, the hand stops a row from the edge). Measured on Dorothea (14 rows): rows 0..5 hand y 290.7 + 34.67 r, Thunder 481.3.
+static float cv_ul_p(int r){ return 34.67f*(float)r+(r>=6 ? 51.9f : 0.f); }
+static int cv_ul_row(u64 ul,float y){ s32 n=RDS32(ul+0x54); if(n<=0||n>40) return -1; int top=(int)*(volatile u16*)(ul+0x6a); if(top>=n) top=0;
+  float y0=286.6f-cv_ul_p(top); for(int r=0;r<n;r++){ float d=y-(y0+cv_ul_p(r)); if(d>=-17.3f && d<17.3f) return r; }
+  return -1; }   // the Magic header or below the last row
 static int convoy_tap(u64 g,float x,float y){
   u64 ul=g+CV_UL, us=g+CV_US, ts=g+CV_TS;
   if(!is_widget(ul,0x1a4a218)) return 0;
@@ -718,13 +725,12 @@ static int convoy_tap(u64 g,float x,float y){
     if(conf){ dt_on=0; q_push(BTN_A,2,3); } else dt_arm(g+CV_IDX,t,g+CV_TOP,top);   // double tap to confirm
     tm_log2("convoy row",top+t,top+ci); return 1; }
   // unit item list
-  if(x>=110.f&&x<=490.f&&y>=268.f&&y<=500.f){
+  if(x>=110.f&&x<=490.f&&y>=268.f&&y<=620.f){ int it=cv_ul_row(ul,y); if(it<0) return 1;
     // from the convoy: instant. SetIndex on the (unfocused) unit list, then ZL moves the focus there (keeping the convoy's tab;
     // Left on the first tab would flip the convoy to it) and the hand lands right on the row; selected only, the next tap confirms
-    if(foc){ s32 n=RDS32(ul+0x54); int it=(int)((y-286.6f)/35.2f+0.5f+100.f)-100; if(n<=0||n>40||it<0||it>=n) return 1;
-      if(RDS32(ul+0x4c)!=it) ((SetIdxFn)(g_main+0x5de5b0))(ul,it);
+    if(foc){ if(RDS32(ul+0x4c)!=it) ((SetIdxFn)(g_main+0x5de5b0))(ul,it);
       q_push(BTN_ZL,2,3); dt_arm(ul+0x4c,it,0,0); tm_log2("unit items from convoy",it,0); return 1; }
-    rows_pick(ul,x,y,110.f,490.f,286.6f,35.2f,"unit items"); return 1; }
+    tm_log2("unit items",it,RDS32(ul+0x4c)); list_pick(ul,it); return 1; }
   return 0; // let the generic handlers (e.g. bottom-right Back) have it
 }
 // Options screen (map menu -> Options): common UI list at G+0x2250, tabs Battle/Monastery/General (+ TouchMod, opts.h)
@@ -1377,6 +1383,16 @@ static int map_list_tap(u64 g,float x,float y){
 // through to A on the selected button) and Observe (the same owner, hand hidden). Observe: "B Back", and a reaction bubble on the left
 // (widget vt 0x1a00100 at owner+0x536b8: +0x80 reaction 0 Nod (A) / 1 Joke (Y) / 2 Banter (X), +0x84/+0x88 position (1080p);
 // its fade value +0x8c pulses through 0 while shown, so it is not checked: nothing else in Observe uses A / X / Y); other taps do nothing (A would nod), a drag turns the camera ("R Move Camera").
+// Tea party -> Extra Time -> Gifts: the gift list (vt 0x1a1a820, as Lost Items) owns the hand but the hand is hidden (G+0x50 = 0, a
+// highlight bar instead), so the generic list skipped it and taps went to the picker rule (L / R). Rows are fixed: row middle
+// 201.3 + 34.67 per row from the first visible one (u16 +0x6a; 12 shown), x 55-567. First tap selects (the description shows), the
+// next tap on it gives the gift (A).
+static int tea_gifts_tap(u64 g,float x,float y){
+  if(hand_on(g)) return 0; u64 o=RD64(g+G_HAND_OWNER); if(!mem_ok(o) || RD64(o)!=g_main+0x1a1a820 || !widget_vis(o)) return 0;
+  s32 cnt=RDS32(o+0x54); if(cnt<=0||cnt>200) return 1; if(x<55.f||x>567.f||y<184.f) return 1;
+  int top=(int)*(volatile u16*)(o+0x6a), vis=(int)*(volatile u16*)(o+0x66); if(top>=cnt) top=0; if(vis<=0||vis>12) vis=12;
+  int k=(int)((y-184.f)/34.67f); if(k>=vis) return 1; int t=top+k; if(t>=cnt) return 1;
+  list_pick(o,t); tm_log2("tea gift",t,top); return 1; }
 static u64 tea_extra(u64 g){ u64 o=RD64(g+G_HAND_OWNER); return (mem_ok(o) && RD64(o)==g_main+0x19ffdd8 && widget_vis(o)) ? o : 0; }
 static int tea_extra_tap(u64 g,float x,float y){
   u64 o=tea_extra(g); if(!o) return 0;
@@ -1436,9 +1452,9 @@ static void on_tap(float x,float y){
       q_push(BTN_B,2,3); tm_log2("tutorial close",(s64)x,(s64)y); return; } }
   { u64 g=cmn_ui(); if(g && title_flow_tap(g,x,y)) return; }
   if(title_menu_tap(x,y)) return;
-  { u64 g=cmn_ui(); if(g && (talk_tap(g,x,y) || screens_tap(g,x,y))) return; }
+  { u64 g=cmn_ui(); if(g && (preview_tap(g,x,y) || talk_tap(g,x,y) || screens_tap(g,x,y))) return; }
   if(items_tap(x,y)) return;
-  { u64 g=cmn_ui(); if(g && (storehouse_tap(g,x,y) || tea_extra_tap(g,x,y) || map_tap(g,x,y) || map_list_tap(g,x,y) || hand_list_tap(g,x,y) || hl_list_tap(g,x,y) || birthday_tap(g,x,y))) return; }
+  { u64 g=cmn_ui(); if(g && (storehouse_tap(g,x,y) || tea_extra_tap(g,x,y) || tea_gifts_tap(g,x,y) || map_tap(g,x,y) || map_list_tap(g,x,y) || hand_list_tap(g,x,y) || hl_list_tap(g,x,y) || birthday_tap(g,x,y))) return; }
   // info pop-ups flagged only by G+0x60ab8 that no screen above took: tap anywhere closes them (arrows turn pages)
   { u64 g=cmn_ui(); if(g && RDS32(g+0x60ab8)!=0){
       if(y>=555.f&&y<=605.f&&x>=530.f&&x<=625.f){ q_push(BTN_L,2,3); return; }
