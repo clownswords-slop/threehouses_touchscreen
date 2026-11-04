@@ -164,9 +164,10 @@ static void trade_set(u64 b,u64 unit){
   ((void(*)(u64,u64))RD64(vt+0x1a8))(w,unit);
   ((void(*)(u64,u32,u32,u32))RD64(vt+0xd0))(w,*(volatile u8*)(unit+0x87),0,1);
   ((void(*)(u64))(g_main+0x5dd530))(w); }
-// 1 = valid target (set when asked), 0 = not a target for this action, -1 = can't tell. tx, ty: the tapped tile of a unit that
-// covers several tiles (monsters: each tile has its own forecast and status icons; with -1, -1 the game kept the anchor tile, so
-// they stayed on the first tap's tile), -1, -1 otherwise (as the d-pad passes them).
+// 1 = valid target (set when asked), 0 = not a target for this action, -1 = can't tell. tx, ty: the tapped tile, as the d-pad passes
+// its target entry's tile (+0x29 / +0x2a). Monsters cover several tiles and each has its own forecast and status icons (with -1, -1
+// the game kept the anchor tile); gambits pass x, y on unchanged to main+0x177590, which places the area markers (the arrows over
+// the tiles), so with -1, -1 they stayed around the previous target.
 static int target_game(u64 b,u64 unit,int set,s32 tx,s32 ty){
   u64 ctl=RD64(b+0x3bb8); if(!mem_ok(ctl) || RD64(ctl)!=g_main+0x19f5de0) return -1;
   s32 ss=RDS32(ctl+8), k=RDS32(b+0x3cdc);
@@ -176,9 +177,6 @@ static int target_game(u64 b,u64 unit,int set,s32 tx,s32 ty){
   if(ss!=11 && ss!=5) return -1;
   if(k==2||k==8||k==23||k<0||k>0x1d) return -1;
   return (((TgtFn)(g_main+0x181c90))(ctl,unit,(ss==5&&k==0xf)?0u:1u,0,(u32)set,tx,ty)&0xff)!=0; }
-static int unit_multitile(u64 unit,int x,int y){   // a neighbouring cell holds the same unit (monsters: 2x2 and larger)
-  for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++){ if(!dx&&!dy) continue; u64 c=cell_at(x+dx,y+dy); if(c && RD64(c)==unit) return 1; }
-  return 0; }
 static int any_target_flag(u64 b){   // some tile of the map is highlighted as a target (cell byte +0x26 bit 0x20)
   int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24); if(maxx>32) maxx=32; if(maxy>32) maxy=32;
   for(int y=miny<0?0:miny;y<maxy;y++) for(int x=minx<0?0:minx;x<maxx;x++){ u64 c=cell_at(x,y); if(c && (*(volatile u8*)(c+0x26)&0x20)) return 1; }
@@ -187,8 +185,16 @@ static int target_select(int x,int y){
   u64 b=battle(); u64 c=cell_at(x,y); if(!b||!c) return 0;
   u64 unit=RD64(c); g_tgt_known=0; if(!unit) return 0;
   { u64 pu=RD64(b+0x3ce0); s32 px=RDS32(b+0x3ce8), py=RDS32(b+0x3cec);
-    int mt=unit_multitile(unit,x,y); int r=target_game(b,unit,1,mt?x:-1,mt?y:-1); if(r>=0) g_tgt_known=1;
+    int r=target_game(b,unit,1,x,y); if(r>=0) g_tgt_known=1;
     if(r==1){ u64 ctl=RD64(b+0x3bb8); if(RDS32(ctl+8)!=14) set_cursor_instant(x,y);
+      // the rest of the d-pad's target step (main+0x180290 after main+0x181c90): main+0x174ba0(_, 0) redoes the green area marks
+      // (gambits: they stayed on the old target's area), then main+0x1435c0 on *(*(main+0x1aa7dd8)) + 0x20498 refreshes the HUD
+      if(RDS32(ctl+8)!=14){ ((void(*)(u64,u32))(g_main+0x174ba0))(0,0); u64 m=RD64(g_main+0x1aa7dd8); m= mem_ok(m) ? RD64(m) : 0;
+        if(mem_ok(m)) ((void(*)(u64))(g_main+0x1435c0))(m+0x20498);
+        // sub-state 11 (attack): its handler (main+0x17d0f0) then calls main+0x174e60(ctl, changed). Gambits (sub-state 5, action
+        // kind 0x13) need it too: without it the first tap after the gambit opened left the arrows over the area tiles on the opening
+        // target (later taps were fine; calling it on that screen redrew them for the new target)
+        if(RDS32(ctl+8)==11 || (RDS32(ctl+8)==5 && RDS32(b+0x3cdc)==0x13)) ((void(*)(u64,u32))(g_main+0x174e60))(ctl,1); }
       // the cursor sound (SE 0x1b2, main+0x570100), which the d-pad's target step (main+0x180290) plays after a new target
       if(RD64(b+0x3ce0)!=pu || RDS32(b+0x3ce8)!=px || RDS32(b+0x3cec)!=py) ((void(*)(void))(g_main+0x570100))();
       tm_log2("target game",x*100+y,RDS32(ctl+8)); return 1; }
@@ -598,14 +604,16 @@ static int status_det_now(void); static int bdet_det_now(void);
 static int rt_det_now(void){ return rt_wait_det==2 ? bdet_det_now() : status_det_now(); }   // 1 status sheet, 2 battle unit details
 static u64 rt_own;   // replay as soon as the hand owner is no longer this one (a popup or the next screen took the hand)
 static int rt_settle, rt_still; static float rt_hx, rt_hy;   // with rt_own: also wait until the hand has stopped moving
+static int rt_own_now;   // with rt_own: replay the poll the owner changes, also while the press is still held (as rt_wait_det)
 static float rt_hxmin;   // replay as soon as the hand is right of this x (720p): the hand moved into another list of the same screen
-static void retap_later(float x,float y,int polls){ if(rt_depth>=2) return; rt_x=x; rt_y=y; rt_n=polls; rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_settle=0; rt_still=0; rt_hxmin=0.f; }
+static void retap_later(float x,float y,int polls){ if(rt_depth>=2) return; rt_x=x; rt_y=y; rt_n=polls; rt_probe_vt=0; rt_wait_det=0; rt_own=0; rt_own_now=0; rt_settle=0; rt_still=0; rt_hxmin=0.f; }
 static void retap_on_change(float x,float y,int polls){ u64 g=cmn_ui(); retap_later(x,y,polls); if(g) rt_own=RD64(g+0x58); }
 static float learned_pitch(u32 vt); static float learned_xpitch(u32 vt);
 static void rt_tick(void){ if(rt_n<=0) return;
   // status sheet: replay the tap on the very poll Details mode comes up, also while X is still held (the rest of the press and its
   // gap are not needed; waiting for them took ~7 frames, with the hand showing on the default item first)
   if(rt_wait_det && rt_det_now()){ q_clear(); rt_n=1; }
+  else if(rt_own_now && rt_own && cmn_ui() && *(volatile u8*)(cmn_ui()+0x50) && RD64(cmn_ui()+0x58)!=rt_own && RD64(cmn_ui()+0x58)){ q_clear(); rt_n=1; }
   else if(q_busy()) return;
   // probe: replay the tap as soon as the step has taught us the pitch, instead of waiting out the full delay
   if(rt_probe_vt && (rt_probe_x ? learned_xpitch(rt_probe_vt) : learned_pitch(rt_probe_vt))>0.f) rt_n=1;
@@ -1140,8 +1148,9 @@ static int hand_list_tap(u64 g,float x,float y){
   { int r,c; if(vt==0x1a1ee00 && is_widget(g+0x26368,0x1a0db98) && RDS32(g+0x26350)==1 && cert_stat_at(x,y,&r,&c)){
     press(BTN_X); fz_set(g+0x26368,r,c,0); tm_log2("cert stat details",r,c); return 1; } }
   // a class ability from the class list: X (Details: the grid takes the hand on HP), then the tap again the poll the grid has it, which
-  // moves the focus on to the ability (X sets up the grid's node and focus when pressed, before that: the move isn't undone)
-  if(vt==0x1a1ee00 && RDS32(g+0x26350)==1 && cert_ab_at(g,x,y)>=0){ if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,40); tm_log2("cert ability details",0,0); } return 1; }
+  // moves the focus on to the ability (X sets up the grid's node and focus when pressed, before that: the move isn't undone); without
+// rt_own_now the replay waited ~6 more polls for the X press and its gap to end, with the hand on HP
+  if(vt==0x1a1ee00 && RDS32(g+0x26350)==1 && cert_ab_at(g,x,y)>=0){ if(rt_depth==0){ press(BTN_X); retap_on_change(x,y,40); rt_own_now=1; tm_log2("cert ability details",0,0); } return 1; }
   if((vt==0x1a0db98 && o==g+0x26368 && widget_vis(o)) || (vt==0x1a0dd50 && o==g+CERT_AB && widget_vis(o))){ int r,c;
     int ar=cert_ab_at(g,x,y); u64 A=g+CERT_AB;
     // the list's count stays 0 until it has had the focus once: then the row is set the poll the game has made it the hand owner (fz)
@@ -1150,6 +1159,8 @@ static int hand_list_tap(u64 g,float x,float y){
       list_sound(A); tm_log2("cert ability",ar,n); return 1; }
     if(cert_stat_at(x,y,&r,&c)){ u64 S=g+0x26368; if(!cert_focus(g,S)) return 1;
       g_learn_hold=20; if(RDS32(S+0x50)!=c) set_col(S,c); if(RDS32(S+0x4c)!=r) ((SetIdxFn)(g_main+0x5de5b0))(S,r); list_sound(S); tm_log2("cert stat",r,c); return 1; }
+    // the panel's ZL / ZR arrows (the game takes them in Details too: it closes Details and turns the page)
+    if(y>=150.f && y<=192.f){ if(x>=840.f&&x<=925.f){ press(BTN_ZL); return 1; } if(x>=1140.f&&x<=1230.f){ press(BTN_ZR); return 1; } }
     if(cert_x_at(g,x,y)){ press(BTN_X); return 1; }                                   // "X Details": back to the class list
     if(x>=40.f && x<=360.f && y>=150.f && y<=640.f){                                // the class list: B, then the tapped class (armed)
       u64 cl=g+0x25bc8; int t=-1; if(cert_cl_idx>=0 && RD64(cl)==g_main+0x1a1ee00){ float f=(y-cert_cl_hy)/53.33f; t=cert_cl_idx+(int)(f+(f>=0?0.5f:-0.5f)); if(t<0||t>=RDS32(cl+0x54)) t=-1; }
@@ -1491,11 +1502,11 @@ static void on_tap(float x,float y){
     int tx,ty; if(pick_tile(x,y,&tx,&ty)){ int cx,cy; cursor_get(&cx,&cy);
       if(tlog){ Buf bb={0}; bstr(&bb,"[touchmod] tile "); bint(&bb,tx); bput(&bb,','); bint(&bb,ty); bstr(&bb," cur "); bint(&bb,cx); bput(&bb,','); bint(&bb,cy); bflush(&bb); }
       int has_unit=tile_has_unit(tx,ty);
-      // a first tap presses A only on a unit of yours that can still act (it selects it) or an enemy (A marks its range); allies,
-      // obstacles (destructible walls) and units that have acted open a menu on A, so the first tap only puts the cursor there and a
-      // second tap on it presses A (the branch below)
+      // a first tap presses A only on a unit of yours that can still act (it selects it); on enemies (A turns their attack range on /
+      // off: user request), allies, obstacles (destructible walls) and units that have acted (A opens a menu) the first tap only puts
+      // the cursor there and a second tap on it presses A (the branch below)
       if(phase==0 && has_unit){ u64 u=tile_unit(tx,ty); if(u){ u8 army=*(volatile u8*)(u+0xf1);
-          if(army==2 || army==4 || (army==0 && (*(volatile u8*)(u+0xd6)&4))) has_unit=0; } }
+          if(army==1 || army==2 || army==4 || (army==0 && (*(volatile u8*)(u+0xd6)&4))) has_unit=0; } }
       int want_a = (phase!=0) || has_unit;
       if(cx==tx&&cy==ty){ move_confirmed(); q_push(BTN_A,2,3); }
       else if(phase==1 && cell_at(tx,ty) && !(*(volatile u8*)(cell_at(tx,ty)+0x26)&3)){
@@ -1552,6 +1563,12 @@ static void on_tap(float x,float y){
     // target selection (attack/talk/heal...): step the cursor between targets
     int tx,ty; if(pick_tile(x,y,&tx,&ty)){ int cx,cy; cursor_get(&cx,&cy);
       if(cx==tx&&cy==ty){ q_push(BTN_A,2,3); return; }
+      // Warp destination (controller sub-state 6, "Select a destination."): a free cursor over the green tiles (cell +0x26 bit 0x10);
+      // a tap on an empty one moves the cursor there, the next tap on it confirms (above). Units' tiles can't be picked: ignored
+      // (the target code below would step through targets with Right).
+      { u64 ctl=RD64(b+0x3bb8); if(mem_ok(ctl) && RD64(ctl)==g_main+0x19f5de0 && RDS32(ctl+8)==6){ u64 c=cell_at(tx,ty);
+          if(c && !RD64(c) && (*(volatile u8*)(c+0x26)&0x10)){ if(set_cursor_instant(tx,ty)) ((void(*)(void))(g_main+0x570100))(); tm_log2("warp dest",tx*100+ty,0); }
+          return; } }
       if(tile_has_unit(tx,ty) && !(tx==cx&&ty==cy)){
         // weapon/item picker: cursor still on the acting unit -> any tap confirms
         u64 u=RD64(b+0x3b60); if(u && mem_ok(u) && *(volatile u8*)(u+0xf2)==(u8)cx && *(volatile u8*)(u+0xf3)==(u8)cy){ q_push(BTN_A,2,3); return; }
