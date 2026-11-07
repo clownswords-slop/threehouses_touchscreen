@@ -136,6 +136,10 @@ static void dbg_ext(const char*p){
         int fl= t>=0 ? (int)((u8(*)(int))(g_main+0x403570))(t) : -1;
         oi(i); oc(','); oi(j); oc(' '); oi((s64)tile_height(pp[0],pp[2],-1.f)); oc(' '); oi((s64)a); oc('/'); oi((s64)b); oc(' '); oi((s64)a1); oc('/'); oi((s64)b1); os(" t"); ox(t); oc(' '); oi(fl); os(" | "); }
       oc('\n'); } }
+  else if(starts(p,"hs")){ p+=2; s64 i0=(s64)parse_num(&p), j0=(s64)parse_num(&p), di=(s64)parse_num(&p)-1000, dj=(s64)parse_num(&p)-1000; int n=(int)parse_num(&p);   // heights along a line, positions in 1/100 tile from the map origin (di, dj + 1000)
+    u64 po=RD64(g_main+0x1aa8198), pz=RD64(g_main+0x1aa81a0); if(!po||!pz) return; if(n>60) n=60;
+    for(int k=0;k<=n;k++){ float pp[4]={RDF(po)+(float)(i0+k*di)*10.f,0.f,RDF(pz)+(float)(j0+k*dj)*10.f,1.f}; float a=0,b=0;
+      ((void(*)(float*,int,float*,float*))(g_main+0x5a5d30))(pp,0,&a,&b); oi((s64)(i0+k*di)); oc(','); oi((s64)(j0+k*dj)); oc(' '); oi((s64)a); oc('/'); oi((s64)b); oc(' '); oi((s64)tile_height(pp[0],pp[2],-1.f)); oc(10); } }
   else if(starts(p,"cells")){ p+=5; int x0=(int)parse_num(&p), y0=(int)parse_num(&p), x1=(int)parse_num(&p), y1=(int)parse_num(&p);
     for(int j=y0;j<=y1;j++){ for(int i=x0;i<=x1;i++){ u64 po=RD64(g_main+0x1aa8198), pz=RD64(g_main+0x1aa81a0); if(po&&pz){ oi((s64)tile_height(RDF(po)+(i+0.5f)*1000.f,RDF(pz)+(j+0.5f)*1000.f,-1.f)); oc(' '); } } oc('\n'); } }
   else if(starts(p,"sstr")){ p+=4; while(*p==' ') p++; char t[64]; int n=0; while(*p&&*p!='\n'&&*p!=';'&&n<63){ t[n++]=*p++; } t[n]=0; if(n<2){ os("short\n"); return; }

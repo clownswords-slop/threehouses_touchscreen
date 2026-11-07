@@ -274,6 +274,7 @@ static u64 cam_obj(void){ u64 p=RD64(g_main+0x1ab8480); if(!p || !mem_ok(p)) ret
 typedef void (*CurShowFn)(u64 b,int show);
 static int g_touch_mode, g_cur_hidden, g_move_hide, g_move_ph, g_move_walk;
 static int g_tap_mode;   // Options -> TouchMod -> Tap To Move: 0 Normal (a second tap confirms), 1 Instant, 2 Instant when safe (opts.h)
+static int g_tile_sel;   // Options -> TouchMod -> Tile Selection: 0 Normal (the tiles as drawn, raised ones included: pick_tile_raised), 1 Flat (the grid, pick_tile_any)
 static int g_cam_sens[2]={7,7};   // Options -> TouchMod -> Horizontal / Vertical Camera Sensitivity 0..15: free-roam camera drag gain fr_gain(v) (opts.h)
 // called when a touch confirms the destination of a move (A pressed in phase 1)
 static void move_confirmed(void){ u64 b=battle(); if(!b) return; s32 ph=RDS32(b+0x3cc0); if(ph!=1) return; g_move_hide=1; g_move_ph=0; g_move_walk=0; }
@@ -447,11 +448,60 @@ static int pick_tile_grid(float tx,float ty,int*ox,int*oy){
     float sx,sy,cw; if(!proj_pt(m,orgx+(i+0.5f)*1000.f,hs*0.25f,orgz+(j+0.5f)*1000.f,&sx,&sy,&cw)) continue;
     if(cw<bw){ bw=cw; bi=i; bj=j; } }
   if(bi<0) return 0; *ox=bi; *oy=bj; return 1; }
+// Tile Selection: Normal. The range / target boxes the game draws (after selecting a unit) are flat 1000x1000 quads at each tile's
+// box height (see tile_heights; matched on screen on a fortress map: walls at 2500 over a 2200 floor and 1400 ground, stairs at 2200).
+// Walls, fences and other raised tiles are drawn at their top, and their box hides the tiles right behind them. The tap ray is
+// intersected with each tile's own plane; a tile is hit when the point falls inside its square, and of the tiles hit the highest one
+// is the one seen (the camera looks down, so the ray meets higher planes first). Heights are cached per map like the grid's.
+// Tiles with a box drawn (cell +0x26 & 0x23: move range 0x3, attack range 0x2, targets 0x20; the Danger Area while shown,
+// battle+0x3d52: cell +0x27 bit 0, filled at the same heights and leaving walls out; the cursor's own box) beat tiles without one: a wall's cursor
+// height (2500) is above its stones, so with the camera turned to look over a wall at the floor behind it (2200), the wall's 2500
+// plane covered the near edge of the floor tiles whose blue boxes show there (Conand Tower, wall 7,7 in front of 7,8).
+// Only raised tiles (cursor height above the ground: walls, pillars, braziers) give way: a plain floor tile is solid at its height and
+// hides the boxes behind it (the courtyard floor in front of the Danger Area outside the walls). The height data (main+0x5a5d30) is
+// per tile, so whether a wall's stone covers a box behind it can't be told; the box wins.
+static float g_th[32*32]; static u8 g_tr[32*32]; static int g_th_ok; static float g_th_sig[3]; static s32 g_th_key[6];
+static int tile_heights(u64 b,float orgx,float orgz,float h0){
+  int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24);
+  if(maxx<=minx||maxy<=miny||minx<0||miny<0||maxx>32||maxy>32) return 0;
+  s32 key[6]={minx,miny,maxx,maxy,(s32)orgx,(s32)orgz};
+  float sig[3]={ tile_height(orgx+(minx+0.5f)*1000.f,orgz+(miny+0.5f)*1000.f,h0), tile_height(orgx+(maxx-0.5f)*1000.f,orgz+(maxy-0.5f)*1000.f,h0),
+                 tile_height(orgx+((minx+maxx)*0.5f)*1000.f,orgz+((miny+maxy)*0.5f)*1000.f,h0) };
+  int same=g_th_ok; for(int k=0;k<6&&same;k++) if(key[k]!=g_th_key[k]) same=0; for(int k=0;k<3&&same;k++) if(sig[k]!=g_th_sig[k]) same=0;
+  if(same) return 1;
+  // box height: the top of layer 1 of main+0x5a5d30 (walls 2500 = the cursor height; stairs 2200 = their top, where the cursor sits
+  // lower, 2000, mid-ramp: with that the far edge of a stair box went to the tile beyond it). Raised: the cursor height above the ground.
+  for(int j=miny;j<maxy;j++) for(int i=minx;i<maxx;i++){ float x=orgx+(i+0.5f)*1000.f, z=orgz+(j+0.5f)*1000.f;
+    float th=tile_height(x,z,h0), p[4]={x,0.f,z,1.f}, g1=0.f, t1=0.f; ((Layers2Fn)(g_main+0x5a5d30))(p,1,&g1,&t1);
+    g_th[j*32+i]= (t1>-50000.f && t1<50000.f && t1!=0.f) ? t1 : th; g_tr[j*32+i]= th-ground_height(x,z,th)>50.f; }
+  for(int k=0;k<6;k++) g_th_key[k]=key[k]; for(int k=0;k<3;k++) g_th_sig[k]=sig[k]; g_th_ok=1; return 1; }
+static int pick_tile_raised(float tx,float ty,int*ox,int*oy){
+  u64 b=battle(), c=cam_obj(); if(!b||!c) return 0;
+  volatile float*m=(volatile float*)(c+0x170); float h0=RDF(c+0x94); if(g_cfrozen){ m=(volatile float*)g_cm; h0=g_ch; }
+  u64 po=RD64(g_main+0x1aa8198), pz=RD64(g_main+0x1aa81a0); if(!po||!pz) return 0;
+  float orgx=RDF(po), orgz=RDF(pz); if(!tile_heights(b,orgx,orgz,h0)) return 0;
+  int minx=RDS32(b+0x3b18), miny=RDS32(b+0x3b1c), maxx=RDS32(b+0x3b20), maxy=RDS32(b+0x3b24);
+  float nx=tx/640.f-1.f, ny=1.f-ty/360.f;   // as pick_plane, with the plane height per tile
+  float a11=m[0]-nx*m[3], a12=m[8]-nx*m[11], a21=m[1]-ny*m[3], a22=m[9]-ny*m[11], det=a11*a22-a12*a21; if(det>-1e-12f&&det<1e-12f) return 0;
+  float rh=-1e30f, fh=-1e30f, dh=-1e30f; int ri=-1,rj=-1, fi=-1,fj=-1, di=-1,dj=-1;   // highest raised / plain floor / drawn hit
+  int danger=*(volatile u8*)(b+0x3d52)!=0, cx=RDS32(b+4), cy=RDS32(b+8);
+  for(int j=miny;j<maxy;j++) for(int i=minx;i<maxx;i++){ float h=g_th[j*32+i]; if(h<=rh && h<=fh && h<=dh) continue;
+    float b1=nx*(m[7]*h+m[15])-(m[4]*h+m[12]), b2=ny*(m[7]*h+m[15])-(m[5]*h+m[13]);
+    float gx=((b1*a22-a12*b2)/det-orgx)/1000.f, gz=((a11*b2-a21*b1)/det-orgz)/1000.f;
+    if(!(gx>=(float)i && gx<(float)(i+1) && gz>=(float)j && gz<(float)(j+1))) continue;
+    u64 ce=cell_at(i,j);
+    if(ce && ((*(volatile u8*)(ce+0x26)&0x23) || (danger && (*(volatile u8*)(ce+0x27)&1)) || (i==cx && j==cy))){ if(h>dh){ dh=h; di=i; dj=j; } }
+    else if(g_tr[j*32+i]){ if(h>rh){ rh=h; ri=i; rj=j; } }
+    else if(h>fh){ fh=h; fi=i; fj=j; } }
+  if(di>=0 && dh>=fh){ *ox=di; *oy=dj; return 1; }      // a box, unless a plain floor tile is in front of it
+  if(fi>=0){ if(ri>=0 && rh>fh){ *ox=ri; *oy=rj; } else { *ox=fi; *oy=fj; } return 1; }
+  if(ri<0) return 0; *ox=ri; *oy=rj; return 1; }
 static int pick_tile_any(float tx,float ty,int*ox,int*oy){   // grid, else the flat plane
   if(g_pick_mode && pick_tile_grid(tx,ty,ox,oy)) return 1;
   return pick_tile_plane(tx,ty,ox,oy,0,0); }
 static int pick_tile(float tx,float ty,int*ox,int*oy){
   if(g_force_tile){ *ox=g_ftx; *oy=g_fty; return 1; }
+  if(g_tile_sel==0 && pick_tile_raised(tx,ty,ox,oy)) return 1;   // Normal; a tap off every tile falls back to the grid (Flat)
   if(pick_tile_any(tx,ty,ox,oy)) return 1;
   return pick_tile_old(tx,ty,ox,oy);
 }

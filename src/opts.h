@@ -4,12 +4,12 @@
 // (G+0x60770) has 5 tab slots (G+0x60870 + i*0x88; the message file still has "Sound/Event" / "Other" tab names); Options opens it
 // with 3 (count G+0x60a9c). Patches (main offsets, each checked against the original instruction first):
 //   0x5fc8d4  tab count 3 -> 4                       0x5fd52c / 0x5fd570  ZR / ZL wrap after tab 3 instead of 2
-//   0x5fd5bc  tab 3 gets IDs 0x22 (Tap To Move), 0x23 / 0x24 (Horizontal / Vertical Camera Sensitivity, 0..15 sliders)
+//   0x5fd5bc  tab 3 gets IDs 0x22 (Tap To Move), 0x23 (Tile Selection), 0x24 / 0x25 (Horizontal / Vertical Camera Sensitivity, 0..15 sliders)
 //   0x5fd288 / 0x5fd80c / 0x5fd838 / 0x5fd9a4  per-tab scroll (list+0x974 +
 //             4*tab) for tabs 0..2 only: tab 3 would land on the tab byte itself
 //   0x669928  tab 3's label (GetMessage(0xff)) -> "Touchscreen"
-//   0x5fe7f8  row labels GetMessage(table[ID]) for IDs 0x22..0x24 (ID in x25)
-//   0x5fe784  value text (main+0x5fe4d0): text for 0x22; for 0x23 / 0x24 a gauge like the volume rows (returns 1, min / value / max
+//   0x5fe7f8  row labels GetMessage(table[ID]) for IDs 0x22..0x25 (ID in x25)
+//   0x5fe784  value text (main+0x5fe4d0): text for 0x22 / 0x23; for 0x24 / 0x25 a gauge like the volume rows (returns 1, min / value / max
 //             through x3 / x4 / x5)                    0x5fe04c  description (main+0x5fe020 returns early for IDs > 0x21)
 //   0x5fd128  Restore defaults -> Yes resets our options too
 // Left/right on our rows are handled here (the game's own handler would write list+0x500+4*ID, other fields).
@@ -25,21 +25,24 @@ static const char* const tap_mode_desc[3]={
   "Tapping a tile with a unit selected does not confirm movement.",
   "Tapping a tile with a unit selected confirms movement.",
   "Tapping a tile with a unit selected confirms movement if it would not place the unit in range of an enemy's attack." };
+static const char* const tile_sel_name[2]={ "Normal", "Flat" };
+static const char* const tile_sel_desc[2]={ "Tapping to select a tile respects its height.", "Tapping to select a tile picks from a flat grid." };
 #define HIDDEN __attribute__((visibility("hidden")))
 HIDDEN const char tm_str_tab[]="Touchscreen";
 HIDDEN const char tm_str_row[]="Tap To Move";
-HIDDEN const char tm_str_row2[]="Horizontal Camera Sensitivity";
-HIDDEN const char tm_str_row3[]="Vertical Camera Sensitivity";
+HIDDEN const char tm_str_row2[]="Tile Selection";
+HIDDEN const char tm_str_row3[]="Horizontal Camera Sensitivity";
+HIDDEN const char tm_str_row4[]="Vertical Camera Sensitivity";
 static const char* const cam_sens_desc[2]={ "Changes the horizontal sensitivity of the camera while controlling Byleth.",
   "Changes the vertical sensitivity of the camera while controlling Byleth." };
 HIDDEN u64 g_fn_getmsg, g_fn_valtext, g_fn_reload;   // used by the stubs
 
-// value text for ID 0x22 (returns 0: text) / gauges for IDs 0x23, 0x24 (returns 1: min, value, max, as the game's volume rows)
+// value text for IDs 0x22, 0x23 (returns 0: text) / gauges for IDs 0x24, 0x25 (returns 1: min, value, max, as the game's volume rows)
 HIDDEN int tm_opt_value(u32 id,char*buf,s32*mn,s32*val,s32*mx){
-  if(id==0x23||id==0x24){ *mn=0; *val=g_cam_sens[id-0x23]; *mx=CAM_SENS_MAX; buf[0]=0; return 1; }
-  const char*s=tap_mode_name[g_tap_mode]; int i=0; while(s[i]&&i<0x1ff){ buf[i]=s[i]; i++; } buf[i]=0; return 0; }
+  if(id==0x24||id==0x25){ *mn=0; *val=g_cam_sens[id-0x24]; *mx=CAM_SENS_MAX; buf[0]=0; return 1; }
+  const char*s= id==0x23 ? tile_sel_name[g_tile_sel] : tap_mode_name[g_tap_mode]; int i=0; while(s[i]&&i<0x1ff){ buf[i]=s[i]; i++; } buf[i]=0; return 0; }
 HIDDEN void tm_opt_desc_id(u32 id){ u64 g=RD64(g_main+0x21d9ae0); if(!g) return; volatile char*d=(volatile char*)(g+0x2d36);
-  const char*s= (id==0x23||id==0x24) ? cam_sens_desc[id-0x23] : tap_mode_desc[g_tap_mode]; int i=0; while(s[i]&&i<0x1ff){ d[i]=s[i]; i++; } while(i<0x200) d[i++]=0; }
+  const char*s= (id==0x24||id==0x25) ? cam_sens_desc[id-0x24] : id==0x23 ? tile_sel_desc[g_tile_sel] : tap_mode_desc[g_tap_mode]; int i=0; while(s[i]&&i<0x1ff){ d[i]=s[i]; i++; } while(i<0x200) d[i++]=0; }
 
 // The stubs are reached with `bl` from the patched instruction (every host function saves x30 and makes calls of its own, so x30
 // is free there); x16 is a scratch register (not used by any of the host functions).
@@ -49,7 +52,7 @@ asm(
 ".hidden tm_stub_rowlabel\n .hidden tm_stub_value\n .hidden tm_stub_desc\n .hidden tm_stub_restore\n"
 ".global tm_stub_fill\n tm_stub_fill:\n"          // "mov x8, xzr" (+ "mov w20, #0x11" -> nop): first ID / count for the tab in w20
 "  and w16, w20, #0xff\n  cmp w16, #3\n  b.eq 1f\n  mov x8, xzr\n  mov w20, #0x11\n  ret\n"
-"1: mov x8, #0x22\n  mov w20, #3\n  ret\n"           // IDs 0x22..0x24 (the ID copy loop after the fill is unrolled by two: needs >= 2)
+"1: mov x8, #0x22\n  mov w20, #4\n  ret\n"           // IDs 0x22..0x25 (the ID copy loop after the fill is unrolled by two: needs >= 2)
 ".global tm_stub_sstore\n tm_stub_sstore:\n"      // "str w23, [x8, #0x974]", x8 = list + 4*tab
 "  sub x16, x8, x19\n  cmp x16, #12\n  b.eq 1f\n  str w23, [x8, #0x974]\n1: ret\n"
 ".global tm_stub_sload\n tm_stub_sload:\n"        // "ldr w8, [x8, #0x974]"
@@ -59,14 +62,15 @@ asm(
 ".global tm_stub_rowlabel\n tm_stub_rowlabel:\n"  // GetMessage(table[ID]), ID in x25
 "  cmp x25, #0x22\n  b.ne 2f\n  adrp x0, tm_str_row\n  add x0, x0, :lo12:tm_str_row\n  ret\n"
 "2: cmp x25, #0x23\n  b.ne 3f\n  adrp x0, tm_str_row2\n  add x0, x0, :lo12:tm_str_row2\n  ret\n"
-"3: cmp x25, #0x24\n  b.ne 1f\n  adrp x0, tm_str_row3\n  add x0, x0, :lo12:tm_str_row3\n  ret\n"
+"3: cmp x25, #0x24\n  b.ne 4f\n  adrp x0, tm_str_row3\n  add x0, x0, :lo12:tm_str_row3\n  ret\n"
+"4: cmp x25, #0x25\n  b.ne 1f\n  adrp x0, tm_str_row4\n  add x0, x0, :lo12:tm_str_row4\n  ret\n"
 "1: adrp x16, g_fn_getmsg\n  ldr x16, [x16, :lo12:g_fn_getmsg]\n  br x16\n"
 ".global tm_stub_value\n tm_stub_value:\n"        // main+0x5fe4d0(list, ID, buf, &min, &value, &max): 0 = text in buf, 1 = gauge
-"  cmp w1, #0x22\n  b.lo 1f\n  cmp w1, #0x24\n  b.hi 1f\n  stp x29, x30, [sp, #-16]!\n  mov w0, w1\n  mov x1, x2\n  mov x2, x3\n  mov x3, x4\n  mov x4, x5\n"
+"  cmp w1, #0x22\n  b.lo 1f\n  cmp w1, #0x25\n  b.hi 1f\n  stp x29, x30, [sp, #-16]!\n  mov w0, w1\n  mov x1, x2\n  mov x2, x3\n  mov x3, x4\n  mov x4, x5\n"
 "  bl tm_opt_value\n  ldp x29, x30, [sp], #16\n  ret\n"
 "1: adrp x16, g_fn_valtext\n  ldr x16, [x16, :lo12:g_fn_valtext]\n  br x16\n"
 ".global tm_stub_desc\n tm_stub_desc:\n"          // "cmp w8, #0x21" before "b.hi <return>", ID in w8
-"  cmp w8, #0x22\n  b.lo 1f\n  cmp w8, #0x24\n  b.hi 1f\n  stp x29, x30, [sp, #-16]!\n  stp x8, x9, [sp, #-16]!\n  mov w0, w8\n  bl tm_opt_desc_id\n  ldp x8, x9, [sp], #16\n  ldp x29, x30, [sp], #16\n"
+"  cmp w8, #0x22\n  b.lo 1f\n  cmp w8, #0x25\n  b.hi 1f\n  stp x29, x30, [sp, #-16]!\n  stp x8, x9, [sp, #-16]!\n  mov w0, w8\n  bl tm_opt_desc_id\n  ldp x8, x9, [sp], #16\n  ldp x29, x30, [sp], #16\n"
 "1: cmp w8, #0x21\n  ret\n"
 ".global tm_stub_restore\n tm_stub_restore:\n"    // "bl main+0x5fc920" (reload the option values) after Restore defaults -> Yes
 "  stp x29, x30, [sp, #-16]!\n  stp x0, x1, [sp, #-16]!\n  bl tm_opt_restore\n  ldp x0, x1, [sp], #16\n  ldp x29, x30, [sp], #16\n"
@@ -114,15 +118,17 @@ static void settings_load(void){
   if(sd_mount()) return; FH h; if(FsOpen(&h,SETTINGS_PATH,1)) return;
   char b[256]; s64 sz=0; FsSize(&sz,h); if(sz>255) sz=255; u64 got=0; WOpt ro={0}; if(sz<=0||FsReadN(&got,h,0,b,(u64)sz,&ro)) got=0; FsClose(h); b[got]=0;
   int v=settings_int(b,got,"tap_to_move="); if(v>=0&&v<=2) g_tap_mode=v;
+  v=settings_int(b,got,"tile_selection="); if(v>=0&&v<=1) g_tile_sel=v;
   v=settings_int(b,got,"camera_sensitivity="); if(v>=0&&v<=CAM_SENS_MAX) g_cam_sens[0]=g_cam_sens[1]=v;   // the single slider before the split
   v=settings_int(b,got,"camera_sensitivity_h="); if(v>=0&&v<=CAM_SENS_MAX) g_cam_sens[0]=v;
   v=settings_int(b,got,"camera_sensitivity_v="); if(v>=0&&v<=CAM_SENS_MAX) g_cam_sens[1]=v; }
 static void settings_save(void);
-HIDDEN void tm_opt_restore(void){ if(g_tap_mode||g_cam_sens[0]!=CAM_SENS_DEF||g_cam_sens[1]!=CAM_SENS_DEF){
-  g_tap_mode=0; g_cam_sens[0]=g_cam_sens[1]=CAM_SENS_DEF; settings_save(); } }
+HIDDEN void tm_opt_restore(void){ if(g_tap_mode||g_tile_sel||g_cam_sens[0]!=CAM_SENS_DEF||g_cam_sens[1]!=CAM_SENS_DEF){
+  g_tap_mode=0; g_tile_sel=0; g_cam_sens[0]=g_cam_sens[1]=CAM_SENS_DEF; settings_save(); } }
 static void settings_save(void){
   if(sd_mount()) return; FsMkdir("sd:/touchmod");
-  char b[96]; u64 n=0; const char*k1="tap_to_move="; while(*k1) b[n++]=*k1++; b[n++]=(char)('0'+g_tap_mode); b[n++]=10;
+  char b[128]; u64 n=0; const char*k1="tap_to_move="; while(*k1) b[n++]=*k1++; b[n++]=(char)('0'+g_tap_mode); b[n++]=10;
+  const char*k2="tile_selection="; while(*k2) b[n++]=*k2++; b[n++]=(char)('0'+g_tile_sel); b[n++]=10;
   for(int a=0;a<2;a++){ const char*k= a ? "camera_sensitivity_v=" : "camera_sensitivity_h="; while(*k) b[n++]=*k++;
     if(g_cam_sens[a]>=10) b[n++]='1'; b[n++]=(char)('0'+g_cam_sens[a]%10); b[n++]=10; }
   FsDelete(SETTINGS_PATH); if(FsCreate(SETTINGS_PATH,(s64)n)) return; FH h; if(FsOpen(&h,SETTINGS_PATH,2)) return;
@@ -131,15 +137,16 @@ static void settings_save(void){
 // ---- per frame ----
 #define OPT_TAB_BYTE 0x980
 static u64 opt_list(void){ u64 g=cmn_ui(); if(!g) return 0; u64 w=g+0x2250; return is_widget(w,0x1a431f8) ? w : 0; }
-static int opt_row(void){   // our tab: the selected row (0 Tap To Move, 1 / 2 Horizontal / Vertical Camera Sensitivity), -1 elsewhere or while a confirmation (Restore defaults) is up
-  u64 w=opt_list(); if(!w) return -1; if(*(volatile u8*)(w+OPT_TAB_BYTE)!=3 || RDS32(w+0x54)!=3) return -1;
+static int opt_row(void){   // our tab: the selected row (0 Tap To Move, 1 Tile Selection, 2 / 3 Horizontal / Vertical Camera Sensitivity), -1 elsewhere or while a confirmation (Restore defaults) is up
+  u64 w=opt_list(); if(!w) return -1; if(*(volatile u8*)(w+OPT_TAB_BYTE)!=3 || RDS32(w+0x54)!=4) return -1;
   if(*(volatile u8*)(w+0x981) || *(volatile u8*)(w+0x982) || *(volatile u8*)(w+0x983)) return -1;
-  s32 r=RDS32(w+0x4c); return r>=0&&r<3 ? r : -1; }
+  s32 r=RDS32(w+0x4c); return r>=0&&r<4 ? r : -1; }
 static void opt_changed(u32 id){ settings_save();
   u64 w=opt_list(); u64 g=cmn_ui(); if(w&&g){ tm_opt_desc_id(id); u64 d=g+0x2cf8; ((void(*)(u64,int,int))RD64(RD64(d)+0x78))(d,1,1);   // redraw the description
     ((void(*)(u64))RD64(RD64(w)+0x180))(w); } }   // the option-change sound, as the game after a value change (list vfunc 0x180: if list+0x60, main+0x570100 = SE 0x1b2)
 static void opt_set(int v){ if(v<0) v=2; if(v>2) v=0; if(v==g_tap_mode) return; g_tap_mode=v; opt_changed(0x22); }   // wraps, as the game's lists
-static void opt_set_sens(int a,int v){ if(v<0) v=0; if(v>CAM_SENS_MAX) v=CAM_SENS_MAX; if(v==g_cam_sens[a]) return; g_cam_sens[a]=v; opt_changed(0x23+a); }   // a: 0 horizontal, 1 vertical; stops at the ends
+static void opt_set_tile(int v){ v&=1; if(v==g_tile_sel) return; g_tile_sel=v; opt_changed(0x23); }   // two values: either arrow flips it
+static void opt_set_sens(int a,int v){ if(v<0) v=0; if(v>CAM_SENS_MAX) v=CAM_SENS_MAX; if(v==g_cam_sens[a]) return; g_cam_sens[a]=v; opt_changed(0x24+a); }   // a: 0 horizontal, 1 vertical; stops at the ends
 // Tab header: 4 tabs centred like the game's 3 (layout x = screen x - 960, y = 540 - 196); each tab element is
 // *( *(G+0x60870+i*0x88) + 0x18 ), position +0x30/+0x34, flags +0x58 (bit 4 = position changed)
 static const float opt_tab_x[4]={ 690.f, 870.f, 1050.f, 1230.f };
@@ -163,19 +170,20 @@ static void opts_tick(void){
 static void opts_buttons(u64 b){
   if(g_opt_mask){ u64 nb=b&~g_opt_prev; int d= (nb&OPT_LEFT) ? -1 : (nb&OPT_RIGHT) ? 1 : 0;
     if(b&(OPT_LEFT|OPT_RIGHT)) g_opt_hold++; else g_opt_hold=0;
-    if(!d && g_opt_row>=1 && g_opt_hold>20 && (g_opt_hold%4)==0) d= (b&OPT_LEFT) ? -1 : 1;
-    if(d){ if(g_opt_row==0) opt_set(g_tap_mode+d); else opt_set_sens(g_opt_row-1,g_cam_sens[g_opt_row-1]+d); } }
+    if(!d && g_opt_row>=2 && g_opt_hold>20 && (g_opt_hold%4)==0) d= (b&OPT_LEFT) ? -1 : 1;
+    if(d){ if(g_opt_row==0) opt_set(g_tap_mode+d); else if(g_opt_row==1) opt_set_tile(g_tile_sel+d); else opt_set_sens(g_opt_row-2,g_cam_sens[g_opt_row-2]+d); } }
   else g_opt_hold=0;
   g_opt_prev=b; }
 // touch (options_tap): the TouchMod tab is showing / the tapped row is our option; a tap on its left arrow lowers the value,
 // anywhere else on the value side raises it (as the game's rows: left arrow 655-735, value / right arrow from 770)
 static int opts_tabs4(void){ u64 g=RD64(g_main+0x21d9ae0); return g_opts_state==1 && g && RDS32(g+0x60a9c)==4; }
-static int opts_our_row(int it){ u64 w=opt_list(); return w && g_opts_state==1 && *(volatile u8*)(w+OPT_TAB_BYTE)==3 && it>=0 && it<=2; }
+static int opts_our_row(int it){ u64 w=opt_list(); return w && g_opts_state==1 && *(volatile u8*)(w+OPT_TAB_BYTE)==3 && it>=0 && it<=3; }
 // the slider: left arrow -1, right arrow +1, a tap on the bar sets the value under the finger (bar x OPT_BAR_X0..X1, 720p)
 #define OPT_BAR_X0 723.f   // from the volume rows (General tab): left arrow centre 695, bar 723..911, right arrow centre 939
 #define OPT_BAR_X1 911.f
 static void opts_tap_value(int it,float x){
-  if(it>=1){ int a=it-1; if(x>=655.f&&x<OPT_BAR_X0-5.f) opt_set_sens(a,g_cam_sens[a]-1); else if(x>OPT_BAR_X1+7.f) opt_set_sens(a,g_cam_sens[a]+1);
+  if(it>=2){ int a=it-2; if(x>=655.f&&x<OPT_BAR_X0-5.f) opt_set_sens(a,g_cam_sens[a]-1); else if(x>OPT_BAR_X1+7.f) opt_set_sens(a,g_cam_sens[a]+1);
     else if(x>=OPT_BAR_X0-5.f){ float f=(x-OPT_BAR_X0)/(OPT_BAR_X1-OPT_BAR_X0); int v=(int)(f*(float)CAM_SENS_MAX+0.5f); opt_set_sens(a,v); }
     return; }
+  if(it==1){ if(x>=655.f) opt_set_tile(g_tile_sel+1); return; }
   if(x>=655.f&&x<=735.f) opt_set(g_tap_mode-1); else if(x>=770.f) opt_set(g_tap_mode+1); }
