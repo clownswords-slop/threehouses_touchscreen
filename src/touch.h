@@ -929,6 +929,10 @@ static const Seed seeds[]={
   {0x1a462e8, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge List / Repair List (hand 11.5 px above a row's middle)
   {0x1a1f240, 48.f, 0.f, 19.f},     // Saint Statue Artisan: statue list (hand 19 px above a row's middle)
   {0x1a1f3f8, 34.67f, 0.f, 0.7f},   // Saint Statue Artisan: restoration rewards of the chosen statue
+  {0x1a0ee60, 34.67f, 0.f, -10.5f}, // Professor Level: renown list (hand 10.5 px below a row's middle)
+  {0x1a213f0, 53.33f, 0.f, -4.8f},  // Skill Levels: skill list (Sword ... ; hand 4.8 px below a row's middle)
+  {0x1a215b0, 34.67f, 0.f, -10.5f}, // Skill Levels: renown list of the chosen skill (same layout as Professor Level)
+  {0x1a21770, 0.f, 0.f, -4.8f},     // Class Abilities: class list (pitch unmeasured: every tab had one class; hand 4.8 px below a row's middle)
   {0x1a46658, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge Selection
   {0x1a42478, 33.6f, 0.f, 3.f},     // Inventory -> Combat Arts / Abilities / Battalions: Unequip / Trade (also the convoy's Store / Trade)
   {0x1a42808, 33.6f, 0.f, 3.f},     // ... Equip / Trade on an available one (also the convoy's Take / Trade); the probe step bounced Equip -> Trade -> Equip
@@ -1261,6 +1265,13 @@ static int hand_list_tap(u64 g,float x,float y){
   if(vt==0x1a1f3f8 && widget_vis(o)){
     if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("statue details",0,0); return 1; }
     if(x>=70.f && x<=310.f && y>=150.f && y<=355.f){ if(rt_depth==0){ press(BTN_B); retap_on_change(x,y,30); tm_log2("statue list back",(s64)x,(s64)y); } return 1; } }
+  // Class Abilities: the hand is on the tabs (Intermediate / Advanced / Master, vt 0x1a21930) and the tab's class list (tabs - 0x620,
+  // vt 0x1a21770) is shown beside them: a tap on a class enters the list (A) and is replayed the moment the list has the hand
+  if(vt==0x1a21930 && widget_vis(o) && x>=160.f && x<=665.f && y>=170.f){ u64 cl=o-0x620; if(!is_widget(cl,0x1a21770)) return 1;
+    s32 cnt=RDS32(cl+0x54); if(cnt<=0 || cnt>40 || y>222.f+(cnt-1)*60.f || y>600.f) return 1;
+    if(y<=218.f){ if(RDS32(cl+0x4c)!=0){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(cl,0); }   // the first class: instant, the next tap on it confirms
+      press(BTN_A); dt_arm(cl+0x4c,0,0,0); dt_own=cl; tm_log2("class abilities from tabs",0,0); return 1; }
+    if(rt_depth==0){ press(BTN_A); retap_on_change(x,y,30); rt_settle=1; tm_log2("class abilities from tabs",(s64)x,(s64)y); } return 1; }   // a lower class: the replay places it
   if(abilities_tap(g,o,vt,x,y)) return 1;
   // battle: item gained with a full inventory, "You can't carry any more. Select an item to send to the convoy." (list vt 0x1a45588):
   // "B Discard Items" in the corner (only B on the prompt bar)
@@ -1389,7 +1400,8 @@ static int map_area_pick(u64 o,float x,float y,int*pcur){   // area index under 
 static int map_area_tap(u64 o,float x,float y){
   int cur=-1, best=map_area_pick(o,x,y,&cur); if(best<0) return 0;
   if(best==cur){ press(BTN_A); tm_log2("map area A",best,cur); return 1; }
-  ((MapSelFn)(g_main+0x2b2fa0))(o,best); tm_log2("map area",best,cur); return 1; }
+  ((MapSelFn)(g_main+0x2b2fa0))(o,best); ((void(*)(void))(g_main+0x570100))();   // + the cursor sound, as the game's own step (main+0x2b3acc)
+  tm_log2("map area",best,cur); return 1; }
 // Monastery map (R): People / Facilities tabs (ZL/ZR), X Locate in the corner. The map widget is the hand owner
 // (vtable main+0x1a1a688) even though the hand itself is hidden; its tab index sits 0x5ff8 bytes before it.
 static int map_tap(u64 g,float x,float y){
@@ -1473,12 +1485,13 @@ static int birthday_tap(u64 g,float x,float y){
   tm_log2("birthday",(s64)side,(s64)step); return 1;
 }
 // free roam prompts "X Menu" / "R Map" in the bottom-right corner
+static int free_roam(u64 g);
 static int freeroam_corner_tap(u64 g,float x,float y){
-  int finish= x>=28.f && x<=260.f && y>=620.f && y<=665.f;   // "L Finish Exploring" on the left (free days)
+  int finish= x>=28.f && x<=260.f && y>=620.f && y<=680.f;   // "L Finish Exploring" on the left (free days; "L To Battle" in the side story)
   if(!(y>655.f&&x>1005.f) && !finish) return 0;   // "X Menu" spans x 1013-1120, "R Map" 1165-1264
   u64 b=battle(); s32 ph=b?RDS32(b+0x3cc0):-1; if(hud() || (ph!=11&&ph!=26) || hand_on(g)) return 0;
   u64 o=RD64(g+G_HAND_OWNER); if(mem_ok(o) && RD64(o)==g_main+0x1a1a688 && widget_vis(o)) return 0;
-  if(!is_widget(g+0x31120,0x1a44f48)) return 0; // free-roam HUD (vtable 0x1a44f48) is hidden while a conversation is up
+  if(!free_roam(g)) return 0; // free-roam HUD (vtable 0x1a44f48) is hidden while a conversation is up
   if(finish){ press(BTN_LB); tm_log2("finish exploring",(s64)x,ph); return 1; }
   q_push(x<1165.f?(1ul<<2):(1ul<<7),2,4); tm_log2("freeroam corner",(s64)x,ph); return 1;
 }
@@ -1717,6 +1730,15 @@ static float cam_sinpitch(void){ u64 c=cam_obj(); if(!c) return -2.f; float dy=R
 // tilt follows the finger linearly: the sine of the pitch is driven towards (pitch at touch-down - 0.002 per px dragged down; full stick from 0.015 off) with the right stick (the stick
 // has a dead zone up to ~9000, then the tilt speed grows about linearly; +y lowers the camera, as dragging down does in free roam).
 static float cam_sp0; static int cam_steps, cam_push, cam_pdir, cam_cool;
+static u64 fr_ctrl(void); static int talk_open(u64 g);
+// free roam: the monastery's HUD (G+0x31120, vt 0x1a44f48), or the side story's (Abyss, phase 11 or 26: that HUD stays hidden; the same
+// camera controller runs, no hand, no conversation open)
+static int free_roam(u64 g){ if(is_widget(g+0x31120,0x1a44f48)) return 1;
+  // the side story's HUD state: G+0x4ec00 (vt 0x1a3de08) +0x98 is 1 in free roam, also while the HUD fades after a camera turn or
+  // a conversation, and 0 with the pause menu open (+0x40 looked the same once but was 0 in free roam after a reload; the prompt
+  // bar, used before, fades with the HUD)
+  u64 b=battle(); s32 ph= b ? RDS32(b+0x3cc0) : -1; if((ph!=11 && ph!=26) || hand_on(g) || !fr_ctrl() || talk_open(g)) return 0;
+  u64 h=g+0x4ec00; return RD64(h)==g_main+0x1a3de08 && RD32(h+0x98)==1; }
 static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
   if(appearance_screen(g)) return 2;
   // Certifications / Reclass class list (vt 0x1a1ee00) with the unit's model in the middle ("R Rotate"): a drag that starts on the
@@ -1727,7 +1749,7 @@ static int cam_screen(void){ u64 g=cmn_ui(); if(!g) return 0;
       u64 o=RD64(g+0x58); if(o>=h && o<h+0x30000) return cam_eye_dist()<3000.f ? 6 : 4; } }
   if(hand_on(g)) return 0;
   if(tea_extra(g)) return 2;                        // tea party Observe ("R Move Camera")
-  if(is_widget(g+0x31120,0x1a44f48)) return 1;    // free-roam HUD up: Byleth is under direct control
+  if(free_roam(g)) return 1;                       // free-roam HUD up: Byleth is under direct control
   { u64 b=battle(), h=hud(); s32 ph= b ? RDS32(b+0x3cc0) : -1;
     if(b && h && cam_obj() && ph==15) return 5;                     // View Unit (Details -> +): the camera orbits the class model
     // battle map (fight 0 / 1, action menu / target selection 2 (a drag there stepped the menu / hopped targets), a unit walking 8,

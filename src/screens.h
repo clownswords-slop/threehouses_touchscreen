@@ -648,7 +648,7 @@ static const BdItem bd_items[]={
   {0x7ff70,0,0,843.f,923.f, 33.7f, 84.7f}, {0x7ff70,0,1,924.f,1004.f, 33.7f, 84.7f}, {0x7ff70,0,2,1005.f,1085.f, 33.7f, 84.7f},
   {0x7ff70,0,3,1086.f,1166.f, 33.7f, 84.7f}, {0x7ff70,0,4,1167.f,1247.f, 33.7f, 84.7f},
   {0x7ff70,1,0,843.f,923.f, 85.7f,136.7f}, {0x7ff70,1,1,924.f,1004.f, 85.7f,136.7f}, {0x7ff70,1,2,1005.f,1085.f, 85.7f,136.7f},
-  {0x7ff70,1,3,1086.f,1166.f, 85.7f,136.7f},
+  {0x7ff70,1,3,1086.f,1166.f, 85.7f,136.7f}, {0x7ff70,1,4,1167.f,1247.f, 85.7f,136.7f},   // ... + class mastery (Hapi: Valkyrie)
 };
 static u64 bd_graph(void){ u64 b=battle(); if(!b || RDS32(b+0x3cc0)!=16) return 0; u64 h=hud(); if(!h) return 0; u64 gr=h+BD_GRAPH;
   if(RD64(gr)!=g_main+0x19ee750) return 0; u32 n=RD32(gr+0x34); if(n<1||n>8) return 0; return gr; }

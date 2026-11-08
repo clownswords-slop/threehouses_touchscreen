@@ -227,6 +227,9 @@ The same layout is used by every common list class.
 | `0x1a1e648` | Seminar lecturer list |
 | `0x1a1ea90` / `0x1a1ec48` / `0x1a1ee00` | Reclass: unit list / class grid / class list |
 | `0x1a1f240` / `0x1a1f3f8` | Saint Statue: statue list / rewards |
+| `0x1a0ee60` | Professor Level: renown list |
+| `0x1a213f0` / `0x1a215b0` | Skill Levels: skill list / renown list |
+| `0x1a21930` / `0x1a21770` | Class Abilities: tabs / class list (tabs - 0x620) |
 | `0x1a1f768` | Group Tasks: unit list |
 | `0x1a20ce8` / `0x1a20eb0` / `0x1a21070` / `0x1a21230` | Unit Appearance: units / options / attire lists / variants |
 | `0x1a221c0` | Quest Accept / Decline |
