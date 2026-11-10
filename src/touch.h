@@ -933,6 +933,8 @@ static const Seed seeds[]={
   {0x1a213f0, 53.33f, 0.f, -4.8f},  // Skill Levels: skill list (Sword ... ; hand 4.8 px below a row's middle)
   {0x1a215b0, 34.67f, 0.f, -10.5f}, // Skill Levels: renown list of the chosen skill (same layout as Professor Level)
   {0x1a21770, 0.f, 0.f, -4.8f},     // Class Abilities: class list (pitch unmeasured: every tab had one class; hand 4.8 px below a row's middle)
+  {0x1a23308, 53.33f, 0.f, -3.7f},  // Wayseer: Select Character (hand 3.7 px below a row's middle)
+  {0x1a23150, 53.33f, 0.f, -3.8f},  // Wayseer: Pairs Available to Intertwine (one row seen: pitch assumed equal to Select Character; hand 3.8 px below the middle)
   {0x1a46658, 34.67f, 0.f, 11.5f},  // Blacksmith: Forge Selection
   {0x1a42478, 33.6f, 0.f, 3.f},     // Inventory -> Combat Arts / Abilities / Battalions: Unequip / Trade (also the convoy's Store / Trade)
   {0x1a42808, 33.6f, 0.f, 3.f},     // ... Equip / Trade on an available one (also the convoy's Take / Trade); the probe step bounced Equip -> Trade -> Equip
@@ -1272,6 +1274,8 @@ static int hand_list_tap(u64 g,float x,float y){
     if(y<=218.f){ if(RDS32(cl+0x4c)!=0){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(cl,0); }   // the first class: instant, the next tap on it confirms
       press(BTN_A); dt_arm(cl+0x4c,0,0,0); dt_own=cl; tm_log2("class abilities from tabs",0,0); return 1; }
     if(rt_depth==0){ press(BTN_A); retap_on_change(x,y,30); rt_settle=1; tm_log2("class abilities from tabs",(s64)x,(s64)y); } return 1; }   // a lower class: the replay places it
+  // Wayseer: Pairs Available to Intertwine (vt 0x1a23150): "X Swap display" in the corner (swaps the names in each pair)
+  if(vt==0x1a23150 && inbox(x,y,1110.f,1264.f,680.f,718.f) && prompt_bar_has(g,0x1000)){ press(BTN_X); tm_log2("wayseer swap",0,0); return 1; }
   if(abilities_tap(g,o,vt,x,y)) return 1;
   // battle: item gained with a full inventory, "You can't carry any more. Select an item to send to the convoy." (list vt 0x1a45588):
   // "B Discard Items" in the corner (only B on the prompt bar)

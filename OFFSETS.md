@@ -230,6 +230,8 @@ The same layout is used by every common list class.
 | `0x1a0ee60` | Professor Level: renown list |
 | `0x1a213f0` / `0x1a215b0` | Skill Levels: skill list / renown list |
 | `0x1a21930` / `0x1a21770` | Class Abilities: tabs / class list (tabs - 0x620) |
+| `0x1a23308` | Wayseer: Select Character list |
+| `0x1a23150` | Wayseer: Pairs Available to Intertwine (X Swap display) |
 | `0x1a1f768` | Group Tasks: unit list |
 | `0x1a20ce8` / `0x1a20eb0` / `0x1a21070` / `0x1a21230` | Unit Appearance: units / options / attire lists / variants |
 | `0x1a221c0` | Quest Accept / Decline |
