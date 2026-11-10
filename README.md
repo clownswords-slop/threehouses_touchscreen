@@ -1,6 +1,6 @@
 # Three Houses Touchscreen Support
 
-fully opus 5.5 vibecoded mod that adds touchscreen/mouse support to three houses. covered the menus and verbs I saw throughout a blue lions campaign played via ryujinx and a mouse. comfortable enough to consider this "released" but let me know if I missed anything or if you have feedback
+fully opus 5.5 vibecoded mod that adds touchscreen/mouse support to three houses. covered the menus and verbs I saw throughout an ng and ng+ campaign played via ryujinx and a mouse. comfortable enough to consider this "released" but let me know if I missed anything or if you have feedback
 
 #### features
 - tap to select menu items, tiles, "buttons" that showed contextual controls (e.g. "(L) Log" during dialogue), and info on status screens
