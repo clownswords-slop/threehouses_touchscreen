@@ -32,7 +32,7 @@ static int cal_days_in(u64 o){ u64 p=RD64(o+0x80); if(!mem_ok(p)||!mem_ok(p+32*0
 // Events panel rows (list vt 0x1a24bc0): section headers ("This Week's Activity", "Events") are rows too; byte +0x516+i = row i can be
 // selected (0 = header). Hand y of row i (unscrolled) = 149.3 + 48 per row above it + 8 more per header above it (headers are 56 tall).
 // Returns the selectable row nearest to y, -1 for none, -2 when the list is scrolled (positions unknown).
-static int cal_ev_row(u64 ev,float y){ s32 cnt=RDS32(ev+0x54); if(cnt<=1||cnt>40) return -1; if((short)(RD32(ev+0x68)>>16)!=0) return -2;
+static int cal_ev_row(u64 ev,float y){ s32 cnt=RDS32(ev+0x54); if(cnt<=1||cnt>500) return -1; if((short)(RD32(ev+0x68)>>16)!=0) return -2;
   float ry=149.3f, bd=1e9f; int best=-1;
   for(int i=0;i<cnt;i++){ int sel=*(volatile u8*)(ev+0x516+i)!=0; if(sel){ float d=y-ry; if(d<0) d=-d; if(d<bd){ bd=d; best=i; } } ry+= sel ? 48.f : 56.f; }
   return bd<=30.f ? best : -1; }
@@ -61,7 +61,7 @@ static int calendar_tap(u64 g,float x,float y){
         if(t!=d){ if(t>1){ *(volatile s32*)(dl+0x88)=t-1; press(BTN_R); } else { *(volatile s32*)(dl+0x88)=2; press(BTN_L); } }
         dt_arm(dl+0x88,t,0,0); tm_log2("calendar day instant",t,d); return 1; }
       if(rt_depth==0){ press(BTN_B); retap_later(x,y,20); } return 1; }   // layout not known yet: back to the days, then the tap
-    s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=1||cnt>40||idx<0||idx>=cnt) return 1;
+    s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=1||cnt>500||idx<0||idx>=cnt) return 1;
     if(x<35.f||x>520.f) return 1;
     int t=cal_ev_row(o,y);
     if(t==-2){ float hy=RDF(g+0x30)/1.5f, f=(y-hy)/48.f; int dd=(int)(f+(f>=0?0.5f:-0.5f)); t=idx+dd; if(t<0||t>=cnt||!*(volatile u8*)(o+0x516+t)) return 1; }   // scrolled list: from the hand
@@ -194,7 +194,7 @@ static const StItem st_items[]={
 #define G_STNAV 0x60178
 #define G_STCUR 0x602c8
 static int st_hit_list(u64 g,u64 L,float x,float y,int*orow,int*ocol){
-  u32 off=(u32)(L-g); s32 cnt=RDS32(L+0x54), ccnt=RDS32(L+0x58); if(cnt<=0||cnt>40) return 0; if(ccnt<1) ccnt=1;
+  u32 off=(u32)(L-g); s32 cnt=RDS32(L+0x54), ccnt=RDS32(L+0x58); if(cnt<=0||cnt>500) return 0; if(ccnt<1) ccnt=1;
   if(off==0x5b288||off==0x5bde8){                   // Classes (1)/(2): grid, column 0 = row header, per-row column counts at +0x53c
     for(int r=0;r<cnt&&r<8;r++){ int nc=(int)*(volatile signed char*)(L+0x53c+r); if(nc>ccnt) nc=ccnt;
       for(int c=1;c<nc;c++){ float hx=620.f+100.f*(float)(c-1), hy=164.f+100.f*(float)r;
@@ -504,7 +504,7 @@ static int dlc_tap(u64 g,float x,float y){
     float f=(y-152.f)/35.f; int r=(int)(f+(f>=0?0.5f:-0.5f)); if(r<0||r>=cnt) return 1;
     list_pick(sl,r); tm_log2("dlc set",r,idx); return 1; }
   if(!right){ if(x<480.f && y<230.f && rt_depth==0){ press(BTN_B); retap_later(x,y,15); } return 1; }   // set list: leave Details
-  s32 idx=RDS32(cl+0x4c), cnt=RDS32(cl+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
+  s32 idx=RDS32(cl+0x4c), cnt=RDS32(cl+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
   float hy=RDF(g+0x30)/1.5f, f=(y-(hy+3.f))/35.f; int d=(int)(f+(f>=0?0.5f:-0.5f)); if(idx+d<0||idx+d>=cnt) return 1;
   if(d) list_jump(cl,idx+d,0); tm_log2("dlc contents",idx+d,idx); return 1; }
 // ---- Storehouse / shop "Sell how many?" dialog: quantity picker on top (no hand), Sell / Cancel buttons below = a 1x2 grid at G+0x8d8b0
@@ -541,13 +541,13 @@ static int guild_tap(u64 g,float x,float y){
     if(prompt_tap(x,y,guild_rep_prompts,NP(guild_rep_prompts))) return 1;
     if(inbox(x,y,945.f,1220.f,228.f,280.f)){ press(BTN_PLUS); tm_log2("guild replenish",0,0); return 1; }
     if(y>=88.f&&y<=126.f){ if(x>=35.f&&x<=115.f) press(BTN_ZL); else if(x>=750.f&&x<=830.f) press(BTN_ZR); return 1; }
-    if(cnt<=0||cnt>60||idx<0||idx>=cnt||x<50.f||x>800.f) return 1;
+    if(cnt<=0||cnt>500||idx<0||idx>=cnt||x<50.f||x>800.f) return 1;
     float f=(y-(hy+2.7f))/34.7f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int t=idx+d; if(t<0||t>=cnt) return 1;
     list_jump(o,t,1); tm_log2("guild tick",t,idx); return 1; }
   int dismiss=help_text_is(g,"Select a battalion to dismiss");
   if(dismiss && inbox(x,y,505.f,755.f,42.f,84.f)){ press(BTN_X); return 1; }        // X Sort by
   if(!dismiss && y>=88.f && y<=128.f){ if(x>=830.f&&x<=900.f){ press(BTN_LB); return 1; } if(x>=1185.f&&x<=1255.f){ press(BTN_RB); return 1; } }
-  if(cnt<=0||cnt>60||idx<0||idx>=cnt) return 1;
+  if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
   if(x<55.f||x>720.f||y<160.f||y>375.f) return 1;
   float f=(y-(hy+3.f))/34.67f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int t=idx+d; if(t<0||t>=cnt) return 1;
   list_pick(o,t); tm_log2(dismiss?"guild dismiss":"guild hire",t,idx); return 1; }

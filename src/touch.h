@@ -566,7 +566,7 @@ static u64 tick_freq=19200000; // Switch CNTFRQ
 static u64 cmn_ui(void){ if(!g_main) return 0; u64 p=RD64(g_main+0x21d9ae0); return (p&&mem_ok(p))?p:0; }
 // "wheel" style list: highlighted row stays at a fixed y and the list scrolls around it
 static int wheel_tap(u64 w,float ty,float hy,float sp,const char*name){
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 0;
   float f=(ty-hy)/sp; int d=(int)(f+(f>=0?0.5f:-0.5f)); int it=idx+d; if(it<0||it>=cnt) return 1;
   list_jump(w,it,1);
   if(tlog){ Buf b={0}; bstr(&b,"[touchmod] "); bstr(&b,name); bstr(&b," item "); bint(&b,it); bflush(&b); }
@@ -630,7 +630,7 @@ static int yesno_tap(float x,float y){
 }
 // vertical list with fixed row geometry: row i centre = y0 + sp*i
 static int rows_tap(u64 w,float x,float y,float x0,float x1,float y0,float sp,const char*name){
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 0;
   if(x<x0||x>x1) return 0;
   float f=(y-y0)/sp; int it=(int)(f+0.5f+100.f)-100; if(it<0||it>=cnt) return 0;
   list_jump(w,it,1);
@@ -638,7 +638,7 @@ static int rows_tap(u64 w,float x,float y,float x0,float x1,float y0,float sp,co
   return 1;
 }
 static int rows_pick(u64 w,float x,float y,float x0,float x1,float y0,float sp,const char*name){   // rows_tap with double tap to confirm
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 0;
   if(x<x0||x>x1) return 0;
   float f=(y-y0)/sp; int it=(int)(f+0.5f+100.f)-100; if(it<0||it>=cnt) return 0;
   list_pick(w,it); tm_log2(name,it,idx); return 1; }
@@ -800,7 +800,7 @@ static void op_fix_tick(void){ if(op_fix_mid<0) return; u64 g=cmn_ui();
   *(volatile s32*)(g+OP_LIST+0x974+4*op_fix_mid)=op_fix_val; op_fix_mid=-1; }
 static int options_tap(u64 g,float x,float y){
   u64 w=g+OP_LIST; if(!is_widget(w,0x1a431f8)) return 0;
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54), tab=RDS32(g+OP_TAB); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54), tab=RDS32(g+OP_TAB); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
   if(inbox(x,y,1100.f,1264.f,682.f,718.f)){ q_push(BTN_MINUS,2,4); return 1; }   // "- Restore defaults"
   if(y>=108.f&&y<=158.f){ // tab strip (4 tabs with the TouchMod tab, opts.h: 720p x 460 / 580 / 700 / 820)
     int nt= opts_tabs4() ? 4 : 3; tab&=0xff;
@@ -835,7 +835,7 @@ static float bitems_row_y(u64 g,u64 w,int i){
   if(top==0) return 133.3f+34.67f*(float)i+(ms>0 && i>=ms ? hd : 0.f);
   float hy=RDF(g+0x30)/1.5f; return hy+34.67f*(float)(i-idx)+((ms>0 && i>=ms)?hd:0.f)-((ms>0 && idx>=ms)?hd:0.f); }
 static int bitems_pick(u64 g,u64 w,float x,float y){
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0; if(x<835.f||x>1215.f) return 0;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 0; if(x<835.f||x>1215.f) return 0;
   int best=-1; float bd=1e9f; for(int i=0;i<cnt;i++){ float d=y-bitems_row_y(g,w,i); if(d<0) d=-d; if(d<bd){ bd=d; best=i; } }
   if(best<0||bd>18.f) return 0; list_pick(w,best); tm_log2("items",best,idx); return 1; }
 // item screens: battle "Items" list + its Use/Trade/Discard submenu, and the convoy screen.
@@ -981,7 +981,7 @@ static const HlList* hl_active(u64 g){
   return 0; }
 static int hl_list_tap(u64 g,float x,float y){
   const HlList*h=hl_active(g); if(!h) return 0; u64 w=g+h->off;
-  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>60||idx<0||idx>=cnt) return 1;
+  s32 idx=RDS32(w+0x4c), cnt=RDS32(w+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
   if(x<h->x0||x>h->x1) return 1;
   float hy=RDF(g+h->ind+4)/1.5f, p=learned_pitch(h->vt); if(p<=0.f) p=h->pitch;
   float f=(y-hy)/p; int d=(int)(f+(f>=0?0.5f:-0.5f)); if(idx+d<0||idx+d>=cnt) return 1;
@@ -1044,7 +1044,7 @@ static void ab_tick(void){
   if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return;
   u64 l=o+0x758; if(!is_widget(l,0x1a42108) || (*(volatile u8*)(l+8)&0x0c)!=0x0c) return;
   float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f; if(hx>400.f) return;
-  s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return;
+  s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return;
   ab_own=o; ab_l_hy0=hy-ab_rowoff(vt==0x1a40300,vt==0x1a40498,cnt,idx); }
 static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
   if(vt!=0x1a40300 && vt!=0x1a40498 && vt!=0x1a40630) return 0;
@@ -1055,7 +1055,7 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
     if(inbox(x,y,960.f,1250.f,42.f,82.f)){ press(BTN_X); return 1; } }
   if(inbox(x,y,1180.f,1264.f,682.f,718.f)){ press(BTN_X); tm_log2("abilities details",0,0); return 1; }   // "X Details" in the corner
   u64 l=o+0x758, r=o+0xdb0; if(!is_widget(l,0x1a42108)) return 1;
-  s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 1;
+  s32 idx=RDS32(l+0x4c), cnt=RDS32(l+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
   int rok=is_widget(r,batt?0x1a41770:0x1a41400); s32 ridx= rok? RDS32(r+0x4c) : -1, rcnt= rok? RDS32(r+0x54) : 0;
   float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f;
   if(ab_x_w) return 1;                           // a switch to the other list is on its way
@@ -1066,7 +1066,7 @@ static int abilities_tap(u64 g,u64 o,u64 vt,float x,float y){
       if(x<30.f || y<120.f || y>640.f) return 1;
       press(BTN_L); if(best>=0){ ab_x_w=l; ab_x_it=best; ab_x_n=60; }
       tm_log2("to equipped",best,(s64)y); return 1; }
-    if(!rok || rcnt<=0 || rcnt>200 || ridx<0 || ridx>=rcnt) return 1;
+    if(!rok || rcnt<=0 || rcnt>500 || ridx<0 || ridx>=rcnt) return 1;
     if(x<hx-15.f || x>hx+(batt?680.f:360.f)) return 1;
     float f=(y-(hy-1.f))/35.05f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int it=ridx+d;
     if(it<0||it>=rcnt) return 1;
@@ -1268,7 +1268,7 @@ static int hand_list_tap(u64 g,float x,float y){
   // Class Abilities: the hand is on the tabs (Intermediate / Advanced / Master, vt 0x1a21930) and the tab's class list (tabs - 0x620,
   // vt 0x1a21770) is shown beside them: a tap on a class enters the list (A) and is replayed the moment the list has the hand
   if(vt==0x1a21930 && widget_vis(o) && x>=160.f && x<=665.f && y>=170.f){ u64 cl=o-0x620; if(!is_widget(cl,0x1a21770)) return 1;
-    s32 cnt=RDS32(cl+0x54); if(cnt<=0 || cnt>40 || y>222.f+(cnt-1)*60.f || y>600.f) return 1;
+    s32 cnt=RDS32(cl+0x54); if(cnt<=0 || cnt>500 || y>222.f+(cnt-1)*60.f || y>600.f) return 1;
     if(y<=218.f){ if(RDS32(cl+0x4c)!=0){ g_learn_hold=20; ((SetIdxFn)(g_main+0x5de5b0))(cl,0); }   // the first class: instant, the next tap on it confirms
       press(BTN_A); dt_arm(cl+0x4c,0,0,0); dt_own=cl; tm_log2("class abilities from tabs",0,0); return 1; }
     if(rt_depth==0){ press(BTN_A); retap_on_change(x,y,30); rt_settle=1; tm_log2("class abilities from tabs",(s64)x,(s64)y); } return 1; }   // a lower class: the replay places it
@@ -1292,7 +1292,7 @@ static int hand_list_tap(u64 g,float x,float y){
     if(x>=470.f&&x<615.f) q_push(1ul<<8,2,4); else if(x>=665.f&&x<=810.f) q_push(1ul<<9,2,4); else if(!prep && x>=940.f&&x<=1180.f) q_push(1ul<<7,2,4);
     return 1; }
   if(vt==0x1a1cd88 && widget_vis(o)){ // Gardening seeds: "< n >" amount picker on each row (arrows at x 372 / 474), A hands them over
-    s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>200||idx<0||idx>=cnt) return 1;
+    s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
     float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f; if(x<hx-20.f || x>hx+520.f) return 1;
     float f=(y-(hy+12.f))/34.67f; int d=(int)(f+(f>=0?0.5f:-0.5f)); if(idx+d<0||idx+d>=cnt) return 1;
     int arrow= (x>=340.f&&x<=402.f) ? -1 : (x>=444.f&&x<=506.f) ? 1 : 0;
@@ -1321,7 +1321,7 @@ static int hand_list_tap(u64 g,float x,float y){
       // instant: the column next to the target (SetColumn), one real step onto it (the game runs its own update), then A
       if(d) grid_jump(o,idx,it,1); else q_push(BTN_A,2,3);
       tm_log2("row",d,(s64)vt); return 1; }
-    if(cnt<=0||cnt>200||idx<0||idx>=cnt) return 1;
+    if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
     if(ccnt>1 && ccnt<=20 && cidx>=0 && cidx<ccnt){
       // 2-D grid (e.g. unit pickers with two columns): rows from the hand y, columns start ~45 px left of the hand
       float yp=learned_pitch((u32)vt), xp=learned_xpitch((u32)vt);
@@ -1358,7 +1358,7 @@ static int hand_list_tap(u64 g,float x,float y){
   float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f;
   if(x<hx+p->x0 || x>hx+p->x1) return 1; // outside the list: swallow the tap (no tap-to-close, no stray A)
   float f=(y-(hy-p->off))/p->pitch; int d=(int)(f+(f>=0?0.5f:-0.5f));
-  if(p->has_idx){ s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>60||idx<0||idx>=cnt) return 1;
+  if(p->has_idx){ s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 1;
     if(idx+d<0||idx+d>=cnt) return 1;
     if(p->vt==0x1a21af0 && d!=0){ list_jump(o,idx+d,0); tm_log2("bulletin select",d,(s64)hy); return 1; } // bulletin board: double tap
     if(p->vt==0x1a436f8){ list_pick(o,idx+d); tm_log2("units pick",d,(s64)hy); return 1; }   // Units / Unit Info table: double tap
@@ -1437,7 +1437,7 @@ static int map_list_tap(u64 g,float x,float y){
   if(x<800.f){ u64 m=o+0x64f8; int cur=-1, best= (mem_ok(m) && RD64(m)==g_main+0x1a1a688) ? map_area_pick(m,x,y,&cur) : -1;
     if(best>=0){ if(best!=cur) ((MapSelFn)(g_main+0x2b2fa0))(m,best); press(BTN_B); if(best==cur) press(BTN_A); tm_log2("locate -> area",best,cur); return 1; }
     if(rt_depth==0){ press(BTN_B); retap_later(x,y,15); } return 1; }
-  s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>60||idx<0||idx>=cnt||x<860.f||x>1240.f) return 1;
+  s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt||x<860.f||x>1240.f) return 1;
   float hy=RDF(g+0x30)/1.5f, f=(y-(hy-4.f))/53.33f; int d=(int)(f+(f>=0?0.5f:-0.5f)); int t=idx+d; if(t<0||t>=cnt) return 1;
   if(t!=idx) list_jump(o,t,0); tm_log2("map locate",t,idx); return 1; }
 // Tea party after a perfect tea time: the "Extra Time" menu (hand owner vt 0x19ffdd8: Observe / Gifts / End, buttons 80 px apart, the
@@ -1451,7 +1451,7 @@ static int map_list_tap(u64 g,float x,float y){
 // next tap on it gives the gift (A).
 static int tea_gifts_tap(u64 g,float x,float y){
   if(hand_on(g)) return 0; u64 o=RD64(g+G_HAND_OWNER); if(!mem_ok(o) || RD64(o)!=g_main+0x1a1a820 || !widget_vis(o)) return 0;
-  s32 cnt=RDS32(o+0x54); if(cnt<=0||cnt>200) return 1; if(x<55.f||x>567.f||y<184.f) return 1;
+  s32 cnt=RDS32(o+0x54); if(cnt<=0||cnt>500) return 1; if(x<55.f||x>567.f||y<184.f) return 1;
   int top=(int)*(volatile u16*)(o+0x6a), vis=(int)*(volatile u16*)(o+0x66); if(top>=cnt) top=0; if(vis<=0||vis>12) vis=12;
   int k=(int)((y-184.f)/34.67f); if(k>=vis) return 1; int t=top+k; if(t>=cnt) return 1;
   list_pick(o,t); tm_log2("tea gift",t,top); return 1; }
@@ -1695,7 +1695,7 @@ static int hold_menu(void){
   if(vt==0x1a083f0 && RDS32(o+0x54)<=2){                                           // Praise / Admonish after a session
     for(int i=0;i<4;i++){ u64 h=own_hist[i]; if(h && mem_ok(h) && RD64(h)==g_main+0x1a1ddc8){ hold_wait=0; return 1; } } return 0; }
   if(vt!=0x1a1ddc8) return 0;
-  s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>40||idx<0||idx>=cnt) return 0;
+  s32 idx=RDS32(o+0x4c), cnt=RDS32(o+0x54); if(cnt<=0||cnt>500||idx<0||idx>=cnt) return 0;
   float hx=RDF(g+0x2c)/1.5f, hy=RDF(g+0x30)/1.5f; int it=idx;
   if(t_x>=hx-30.f && t_x<=hx+460.f){ float f=(t_y-hy)/53.33f; int d=(int)(f+(f>=0?0.5f:-0.5f)); if(idx+d>=0 && idx+d<cnt) it=idx+d; }   // on a topic row: that topic
   q_clear(); if(it!=idx) list_jump(o,it,0); hold_wait= it!=idx ? 3 : 0; return 1; }
